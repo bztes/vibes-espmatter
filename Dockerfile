@@ -9,7 +9,8 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 COPY . .
-RUN pnpm build
+# The build validates the env vars (see src/env.ts) but doesn't inline them: placeholders are enough.
+RUN ORIGIN=http://localhost BETTER_AUTH_SECRET=build-placeholder pnpm build
 
 # Development: `vite dev` with the source bind-mounted (see docker-compose.dev.yaml).
 FROM espressif/idf:v5.5.6 AS dev

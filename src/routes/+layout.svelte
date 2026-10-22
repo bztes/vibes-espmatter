@@ -3,6 +3,7 @@
 	import favicon from '#lib/assets/favicon.svg';
 	import Logo from '#lib/device/device-ui/Logo.svelte';
 	import { Button, Dialogs } from '#lib/device/device-ui/ui/index.ts';
+	import { version } from '$app/env';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { getUser, signOut } from '#lib/api/auth.remote.ts';
@@ -48,6 +49,7 @@
 
 	<footer class="border-t px-4 py-6 text-center text-xs text-muted">
 		Built with Espressif’s ESP-IDF &amp; esp-matter. Not affiliated with Espressif or the CSA.
+		<span class="whitespace-nowrap">· v{version}</span>
 	</footer>
 </div>
 

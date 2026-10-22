@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
+import pkg from './package.json' with { type: 'json' };
 
 export default defineConfig({
 	plugins: [
@@ -17,6 +18,8 @@ export default defineConfig({
 				experimental: { async: true }
 			},
 			adapter: adapter(),
+			// Bumped by changesets on release; shown in the footer via `$app/env`.
+			version: { name: pkg.version },
 			experimental: { remoteFunctions: true }
 		})
 	],
