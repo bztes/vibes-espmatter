@@ -1,0 +1,13 @@
+# Development with hot reload and ESP-IDF from the image:
+#   docker compose -f docker-compose.dev.yaml up --build
+services:
+  vibes-espmatter-dev:
+    build:
+      context: .
+      target: dev
+    network_mode: host
+    environment:
+      ORIGIN: ${ORIGIN}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+    volumes:
+      - .:/app

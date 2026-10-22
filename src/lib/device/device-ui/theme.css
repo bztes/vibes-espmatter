@@ -1,0 +1,76 @@
+/*
+ * The Tailwind theme and base styles of the device web interface and of the website (src/app.css
+ * imports this too) – keep it small, the ESP serves it. Use the tokens as utilities: `bg-card`,
+ * `text-muted`, `border-border`, `text-sm`…; in CSS as `var(--color-card)`.
+ *
+ * Without Tailwind's preflight: elements keep the browser defaults the components were built on.
+ */
+@theme {
+	--color-bg: #f6f7f9;
+	--color-card: #ffffff;
+	--color-fg: #18202b;
+	--color-muted: #637083;
+	--color-border: #e3e7ee;
+	--color-accent: #4f46e5;
+	--color-ok: #16a34a;
+	--color-warn: #d97706;
+	--color-err: #dc2626;
+
+	--font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+	/* Sizes only: the line height stays the inherited one. */
+	--text-*: initial;
+	--text-2xs: 11px;
+	--text-xs: 12px;
+	--text-sm: 13px;
+	--text-base: 14px;
+	--text-md: 15px;
+	--text-lg: 18px;
+	--text-xl: 22px;
+}
+
+@layer base {
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--color-bg: #0f141b;
+			--color-card: #171e28;
+			--color-fg: #e6ebf2;
+			--color-muted: #8b97a8;
+			--color-border: #263142;
+			--color-accent: #818cf8;
+		}
+	}
+	:root {
+		color-scheme: light dark;
+	}
+	*,
+	::before,
+	::after {
+		box-sizing: border-box;
+		border-color: var(--color-border);
+	}
+	a {
+		color: var(--color-accent);
+	}
+	body {
+		margin: 0;
+		font: 14px/1.5 var(--font-sans);
+		background: var(--color-bg);
+		color: var(--color-fg);
+	}
+	button,
+	input,
+	select,
+	textarea {
+		font: inherit;
+		color: inherit;
+	}
+	code {
+		font-family: var(--font-mono);
+		font-size: 12px;
+	}
+	svg.lucide-icon {
+		flex-shrink: 0;
+	}
+}

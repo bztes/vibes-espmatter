@@ -1,0 +1,14 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+
+# Miscellaneous
+/static/
+/drizzle/
+
+# Firmware source templates (C/C++/HTML for the ESP)
+src/lib/device/components/*/firmware/
+data/

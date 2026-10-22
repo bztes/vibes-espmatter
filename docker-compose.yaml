@@ -1,0 +1,15 @@
+services:
+  vibes-espmatter:
+    build: .
+    image: vibes-espmatter
+    ports:
+      - '3000:3000'
+    environment:
+      ORIGIN: ${ORIGIN:-http://localhost:3000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
+    volumes:
+      - data:/data
+    restart: unless-stopped
+
+volumes:
+  data:
