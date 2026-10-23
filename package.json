@@ -2,7 +2,7 @@
 	"name": "vibes-espmatter",
 	"private": true,
 	"packageManager": "pnpm@12.15.0",
-	"version": "0.1.1",
+	"version": "0.2.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
