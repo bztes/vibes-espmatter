@@ -1,4 +1,4 @@
-# Development with hot reload and ESP-IDF from the image:
+# Development with hot reload and ESP-IDF from the `idf` service:
 #   docker compose -f docker-compose.dev.yaml up --build
 services:
   vibes-espmatter-dev:
@@ -11,3 +11,18 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
     volumes:
       - .:/app
+    depends_on:
+      - idf
+
+  # Add it as a build worker under /admin with the URL http://localhost:3001.
+  # The app's DATA_DIR is ./data (/app/data in its container): mount it at the same path here.
+  idf:
+    image: espressif/idf:v5.5.6
+    command: ['python3', '/idf-worker.py', '--workspaces', '/app/data/workspaces', '--port', '3001']
+    # Reaps the compiler processes a cancelled build leaves behind (the worker would be PID 1).
+    init: true
+    ports:
+      - '127.0.0.1:3001:3001'
+    volumes:
+      - ./data:/app/data
+      - ./idf-worker.py:/idf-worker.py:ro

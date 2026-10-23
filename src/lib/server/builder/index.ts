@@ -1,19 +1,20 @@
 /**
  * Firmware build runner.
  *
- * Builds are queued here and run one at a time on this server (ESP-IDF at `IDF_PATH`). Each role
- * (chip) of a project is compiled in a workspace directory that is reused for configs with the
- * same sdkconfig/dependencies, so changing e.g. the Wi-Fi password only recompiles a few files.
+ * Builds are queued here and each runs on a free build worker (set up by an admin in /admin), one
+ * build per worker at a time. Each role (chip) of a project is a job: its generated files go to the
+ * worker and the firmware images come back; how (and where the worker keeps its files) is up to
+ * the worker kind, see `idf.ts`.
  */
 import { EventEmitter } from 'node:events';
 import { createWriteStream, existsSync, type WriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import { DATA_DIR, IDF_PATH, IDF_PYTHON, MAX_WORKSPACES } from '$app/env/private';
+import { DATA_DIR } from '$app/env/private';
 import { errorMessage } from '#lib/errors.ts';
 import { db } from '#lib/server/db/index.ts';
-import { build } from '#lib/server/db/schema.ts';
+import { build, worker as workerTable, type Worker } from '#lib/server/db/schema.ts';
 import type { RoleArtifacts, RoleBuildState } from '#lib/build-types.ts';
 import {
 	generateRole,
@@ -23,10 +24,18 @@ import {
 	projectRoles,
 	validateProject
 } from '#lib/device/generator.ts';
-import type { GeneratedProject, ProjectConfig } from '#lib/device/types.ts';
+import type { ProjectConfig } from '#lib/device/types.ts';
 import { buildDeviceUi, DEVICE_UI_SOURCES_HASH } from '#lib/server/device-ui/index.ts';
-import { hash, stableStringify } from '#lib/device/util.ts';
-import { runJob, type BuildJob, type BuildOutput, type JobResult } from './idf.ts';
+import { hash } from '#lib/device/util.ts';
+import {
+	removeUnknownWorkers,
+	removeWorker,
+	runJob,
+	testWorker as runWorkerTest,
+	type BuildJob,
+	type BuildOutput,
+	type JobResult
+} from './idf.ts';
 
 const LOG_TAIL = 300;
 
@@ -40,17 +49,19 @@ interface LiveBuild {
 }
 
 interface BuilderState {
-	initialized: boolean;
+	ready?: Promise<void>;
 	queue: string[];
-	running: Set<string>;
+	/** Running builds → id of the worker they run on. */
+	running: Map<string, string>;
+	workers: Worker[];
 	live: Map<string, LiveBuild>;
 }
 
 // Survive Vite HMR in development.
 const state: BuilderState = ((globalThis as Record<string, unknown>).__mespBuilder ??= {
-	initialized: false,
 	queue: [],
-	running: new Set(),
+	running: new Map(),
+	workers: [],
 	live: new Map()
 }) as BuilderState;
 
@@ -58,14 +69,21 @@ const dataDir = () => path.resolve(DATA_DIR);
 export const artifactDir = (buildId: string, role?: string) =>
 	path.join(dataDir(), 'builds', buildId, ...(role ? [role] : []));
 
-async function init() {
-	if (state.initialized) return;
-	state.initialized = true;
+function init() {
+	return (state.ready ??= setUp());
+}
+
+async function setUp() {
 	// Builds that were running when the server stopped can't be resumed.
 	await db
 		.update(build)
 		.set({ status: 'failed', error: 'Server restarted during the build', finishedAt: new Date() })
 		.where(inArray(build.status, ['queued', 'running']));
+	await reloadWorkers();
+	// Can take a while (whole workspaces): nothing needs to wait for it.
+	void removeUnknownWorkers(state.workers.map((w) => w.id)).catch((err) =>
+		console.error('removing old workspaces failed', err)
+	);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -75,6 +93,12 @@ async function init() {
 export class ConfigError extends Error {
 	constructor(public issues: string[]) {
 		super(issues.join('\n'));
+	}
+}
+
+export class NoWorkerError extends Error {
+	constructor() {
+		super('No build worker is enabled. An admin can set one up under Admin (/admin).');
 	}
 }
 
@@ -106,6 +130,7 @@ export async function enqueueBuild(
 	) {
 		return existing[0].id;
 	}
+	if (!(await hasEnabledWorker())) throw new NoWorkerError();
 
 	const roles: Record<string, RoleBuildState> = {};
 	for (const chip of config.chips) {
@@ -165,6 +190,70 @@ export function queuePosition(id: string): number {
 	return state.queue.indexOf(id);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Workers
+// ---------------------------------------------------------------------------------------------
+
+/** The workers, with the build each one is running. */
+export async function listWorkers(): Promise<(Worker & { buildId: string | null })[]> {
+	await init();
+	const busy = new Map([...state.running].map(([buildId, workerId]) => [workerId, buildId]));
+	return state.workers.map((w) => ({ ...w, buildId: busy.get(w.id) ?? null }));
+}
+
+/** Whether builds can run: at least one worker is enabled. */
+export async function hasEnabledWorker(): Promise<boolean> {
+	await init();
+	return state.workers.some((w) => w.enabled);
+}
+
+async function reloadWorkers() {
+	state.workers = (await db.select().from(workerTable).orderBy(workerTable.createdAt)) as Worker[];
+	kick();
+}
+
+/** Adds a worker (without `id`) or replaces one; `false` if there is no worker `id`. */
+export async function saveWorker({
+	id,
+	...values
+}: Omit<typeof workerTable.$inferInsert, 'id' | 'kind' | 'config'> &
+	Pick<Worker, 'kind' | 'config'> & { id?: string }): Promise<boolean> {
+	await init();
+	if (id) {
+		const updated = await db
+			.update(workerTable)
+			.set(values)
+			.where(eq(workerTable.id, id))
+			.returning({ id: workerTable.id });
+		if (!updated.length) return false;
+	} else {
+		await db.insert(workerTable).values(values);
+	}
+	await reloadWorkers();
+	return true;
+}
+
+export async function deleteWorker(id: string) {
+	await init();
+	if ([...state.running.values()].includes(id)) {
+		throw new Error('The worker is running a build: disable it and delete it once it finished.');
+	}
+	await db.delete(workerTable).where(eq(workerTable.id, id));
+	await reloadWorkers();
+	// Can take a while (whole workspaces): the worker is gone already.
+	void removeWorker(id).catch((err) => console.error('removing worker files failed', err));
+}
+
+/** Checks that a worker is reachable and works: its output, and whether it succeeded. */
+export async function testWorker(id: string): Promise<{ ok: boolean; log: string[] } | undefined> {
+	await init();
+	const worker = state.workers.find((w) => w.id === id);
+	if (!worker) return undefined;
+	const log: string[] = [];
+	const code = await runWorkerTest(worker, (l) => log.push(l), AbortSignal.timeout(60_000));
+	return { ok: code === 0, log };
+}
+
 /** Resolves on the next state/log change of a build (or after `timeoutMs`). */
 export function waitForChange(id: string, timeoutMs = 15000): Promise<void> {
 	return new Promise((resolve) => {
@@ -190,17 +279,35 @@ function createLive(id: string): LiveBuild {
 	return live;
 }
 
+/** Starts queued builds on the free workers. */
 function kick() {
-	while (state.queue.length && state.running.size === 0) {
+	const enabled = state.workers.filter((w) => w.enabled);
+	// Without any worker, queued builds fail with a message instead of waiting forever.
+	if (!enabled.length) return void failQueued(new NoWorkerError().message);
+	const busy = new Set(state.running.values());
+	while (state.queue.length) {
+		const worker = enabled.find((w) => !busy.has(w.id));
+		if (!worker) return;
 		const id = state.queue.shift()!;
-		state.running.add(id);
-		void run(id);
+		state.running.set(id, worker.id);
+		busy.add(worker.id);
+		void run(id, worker);
 	}
 }
 
-async function run(id: string) {
+async function failQueued(error: string) {
+	const ids = state.queue.splice(0);
+	if (!ids.length) return;
+	await db
+		.update(build)
+		.set({ status: 'failed', error, finishedAt: new Date() })
+		.where(and(inArray(build.id, ids), eq(build.status, 'queued')));
+	for (const id of ids) state.live.get(id)?.emitter.emit('change');
+}
+
+async function run(id: string, worker: Worker) {
 	try {
-		await runBuild(id);
+		await runBuild(id, worker);
 	} catch (err) {
 		console.error('build crashed', err);
 		await db
@@ -220,7 +327,7 @@ async function run(id: string) {
 	}
 }
 
-async function runBuild(id: string) {
+async function runBuild(id: string, worker: Worker) {
 	const row = await getBuild(id);
 	if (!row || row.status !== 'queued') return;
 	const live = state.live.get(id) ?? createLive(id);
@@ -244,6 +351,7 @@ async function runBuild(id: string) {
 	};
 
 	await save({ status: 'running', startedAt: new Date() });
+	log(`Build worker: ${worker.name}`);
 	const config = normalizeProject(row.config);
 	const order = projectRoles(config);
 	const cancelQueued = () => {
@@ -270,10 +378,11 @@ async function runBuild(id: string) {
 		const job = dispatch(
 			{
 				id: `${id}-${role.id}`,
-				workspace: workspaceName(generated),
+				name: `${generated.role.id}-${generated.target}`,
 				files: generated.files,
 				binaries
 			},
+			worker,
 			log
 		);
 		live.cancelJob = job.cancel;
@@ -290,7 +399,7 @@ async function runBuild(id: string) {
 		if (code !== 0 || !output) {
 			update({
 				status: 'failed',
-				error: `idf.py exited with code ${code}`,
+				error: `The build exited with code ${code}`,
 				durationMs: Date.now() - started
 			});
 			cancelQueued();
@@ -311,36 +420,17 @@ async function runBuild(id: string) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Workspaces and artifacts
+// Jobs and artifacts
 // ---------------------------------------------------------------------------------------------
 
-/** Files whose change invalidates most of the build → they decide which workspace is used. */
-const WORKSPACE_KEY_FILES = ['sdkconfig.defaults', 'main/idf_component.yml', 'partitions.csv'];
-
-function workspaceName(gen: GeneratedProject): string {
-	const key = hash(stableStringify(WORKSPACE_KEY_FILES.map((f) => gen.files[f] ?? '')));
-	return `${gen.role.id}-${gen.target}-${key}`;
-}
-
-/** Compiles one chip with ESP-IDF on this server. `cancel()` stops idf.py. */
+/** Compiles one chip on a worker. `cancel()` stops it. */
 function dispatch(
 	job: BuildJob,
+	worker: Worker,
 	log: (line: string) => void
 ): { result: Promise<JobResult>; cancel: () => void } {
-	if (!IDF_PATH) {
-		log(
-			'ERROR: IDF_PATH is not set. Install ESP-IDF and set IDF_PATH, or run the app in Docker (see README).'
-		);
-		return { result: Promise.resolve({ code: 1 }), cancel: () => {} };
-	}
 	const abort = new AbortController();
-	const opts = {
-		idfPath: IDF_PATH,
-		idfPython: IDF_PYTHON,
-		root: path.join(dataDir(), 'workspaces'),
-		maxWorkspaces: MAX_WORKSPACES
-	};
-	const result = runJob(job, opts, log, abort.signal).catch((err: unknown) => {
+	const result = runJob(job, worker, log, abort.signal).catch((err: unknown) => {
 		log(`ERROR: ${errorMessage(err)}`);
 		return { code: 1 };
 	});

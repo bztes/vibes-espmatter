@@ -9,6 +9,21 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
     volumes:
       - data:/data
+    depends_on:
+      - idf
+    restart: unless-stopped
+
+  # Compiles the firmware: the official ESP-IDF image runs idf.py for the app (see idf-worker.py).
+  # Add it as a build worker under /admin with the URL http://idf:3001.
+  # Both services mount the volume at /data, so the workspace paths are the same in each.
+  idf:
+    image: espressif/idf:v5.5.6
+    command: ['python3', '/idf-worker.py', '--workspaces', '/data/workspaces', '--port', '3001']
+    # Reaps the compiler processes a cancelled build leaves behind (the worker would be PID 1).
+    init: true
+    volumes:
+      - data:/data
+      - ./idf-worker.py:/idf-worker.py:ro
     restart: unless-stopped
 
 volumes:

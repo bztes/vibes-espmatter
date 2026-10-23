@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
 	import X from '@lucide/svelte/icons/x';
-	import { startBuild } from '#lib/api/builds.remote.ts';
+	import { getCanBuild, startBuild } from '#lib/api/builds.remote.ts';
 	import { errorMessage } from '#lib/errors.ts';
 	import type { GeneratedProject, ProjectConfig } from '#lib/device/types.ts';
 	import { Alert, Button, Dialog } from '#lib/device/device-ui/ui/index.ts';
@@ -44,8 +44,11 @@
 	let dialog = $state<ReturnType<typeof Dialog>>();
 	let starting = $state(false);
 	let error = $state('');
+	/** `currentHash` when "Run build" returned the build already shown: no new build was needed. */
+	let reusedFor = $state<string | null>(null);
 	let codeDialog = $state<ReturnType<typeof Dialog>>();
 	let logDialog = $state<ReturnType<typeof BuildLog>>();
+	const canBuild = $derived(await getCanBuild());
 
 	export function open() {
 		dialog?.open();
@@ -56,9 +59,12 @@
 
 	async function build() {
 		error = '';
+		reusedFor = null;
 		starting = true;
 		try {
-			buildId = (await startBuild({ config, projectId })).id;
+			const { id } = await startBuild({ config, projectId });
+			if (id === buildId) reusedFor = currentHash;
+			buildId = id;
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -86,10 +92,12 @@
 		</header>
 
 		<div class="flex flex-wrap items-center gap-2">
-			<Button variant="primary" onclick={build} disabled={starting || issueCount > 0}>
+			<Button variant="primary" onclick={build} disabled={starting || issueCount > 0 || !canBuild}>
 				{starting ? 'Starting…' : buildId ? 'Run build' : 'Build firmware'}
 			</Button>
-			{#if issueCount}
+			{#if !canBuild}
+				<span class="text-err">No build worker is set up</span>
+			{:else if issueCount}
 				<span class="text-err">
 					Fix {plural(issueCount, 'issue')} in
 					<Button variant="link" onclick={onfix}>Compose</Button> first.
@@ -111,6 +119,11 @@
 			</span>
 		</div>
 		{#if error}<Alert>{error}</Alert>{/if}
+		{#if reusedFor === currentHash}
+			<Alert tone="info">
+				This configuration is already built (or being built) – the build below is the current one.
+			</Alert>
+		{/if}
 
 		{#if buildId}
 			<svelte:boundary pending={loadingBuild} failed={buildLoadFailed}>

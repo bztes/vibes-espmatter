@@ -2,7 +2,7 @@ import * as v from 'valibot';
 import { invalid, redirect } from '@sveltejs/kit';
 import { form, getRequestEvent, query } from '$app/server';
 import { APIError } from 'better-auth/api';
-import { auth, canSignUp } from '#lib/server/auth.ts';
+import { auth, canSignUp, isAdmin } from '#lib/server/auth.ts';
 
 /** Only allow redirects to local paths. */
 function safeRedirect(target: string | undefined) {
@@ -12,11 +12,16 @@ function safeRedirect(target: string | undefined) {
 export const getUser = query(async () => {
 	const { locals } = getRequestEvent();
 	return locals.user
-		? { id: locals.user.id, name: locals.user.name, email: locals.user.email }
+		? {
+				id: locals.user.id,
+				name: locals.user.name,
+				email: locals.user.email,
+				admin: isAdmin(locals.user)
+			}
 		: null;
 });
 
-/** Whether an account can still be created (only before the first one exists). */
+/** Whether an account can be created (always while there is no admin, then if an admin allows it). */
 export const getSignUpOpen = query(() => canSignUp());
 
 export const signIn = form(

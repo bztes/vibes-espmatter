@@ -1,11 +1,11 @@
-# Node 25+ no longer bundles corepack, so install it once and copy this stage's node into the others.
+# Node 25+ no longer bundles corepack, so install it once for the stages that run pnpm.
 FROM node:26-bookworm-slim AS node
-RUN npm install -g corepack
+RUN npm install -g corepack && corepack enable
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
-# The web app, which also compiles the firmware (ESP-IDF from the base image, IDF_PATH is set).
+# The web app.
 FROM node AS build
 WORKDIR /app
-RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 COPY . .
@@ -13,16 +13,11 @@ COPY . .
 RUN ORIGIN=http://localhost BETTER_AUTH_SECRET=build-placeholder pnpm build
 
 # Development: `vite dev` with the source bind-mounted (see docker-compose.dev.yaml).
-FROM espressif/idf:v5.5.6 AS dev
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack && corepack enable
-ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+FROM node AS dev
 WORKDIR /app
 CMD ["sh", "-c", "pnpm install && pnpm dev"]
 
-FROM espressif/idf:v5.5.6
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
+FROM node:26-bookworm-slim
 WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
@@ -36,5 +31,4 @@ ENV NODE_ENV=production \
 VOLUME /data
 EXPOSE 3000
 
-# The base image's entrypoint sources ESP-IDF's export.sh, then runs this.
 CMD ["node", "build"]

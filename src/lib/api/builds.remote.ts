@@ -7,6 +7,8 @@ import {
 	ConfigError,
 	enqueueBuild,
 	getBuild,
+	hasEnabledWorker,
+	NoWorkerError,
 	logTail,
 	queuePosition,
 	waitForChange
@@ -27,10 +29,14 @@ export const startBuild = command(
 			return { id };
 		} catch (err) {
 			if (err instanceof ConfigError) error(400, err.message);
+			if (err instanceof NoWorkerError) error(503, err.message);
 			throw err;
 		}
 	}
 );
+
+/** Whether a build worker is enabled: without one, builds can't be started. */
+export const getCanBuild = query(() => hasEnabledWorker());
 
 export const cancel = command(v.pipe(v.string(), v.uuid()), async (id) => {
 	await cancelBuild(id);

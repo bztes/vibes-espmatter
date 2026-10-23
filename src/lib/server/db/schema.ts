@@ -59,4 +59,44 @@ export const build = sqliteTable(
 	(t) => [index('build_project_idx').on(t.projectId), index('build_hash_idx').on(t.configHash)]
 );
 
+/** How a worker is reached, and what that needs (`worker.config`). */
+export interface WorkerConfigs {
+	/** idf-worker.py at `url`, e.g. the `idf` compose service; it shares DATA_DIR with this server. */
+	'idf-docker': { url: string; maxWorkspaces: number };
+	/** ESP-IDF at `idfPath` on this server. */
+	'idf-local': {
+		idfPath: string;
+		/** Python the ESP-IDF was installed with, if not `python3` on PATH. */
+		idfPython?: string;
+		maxWorkspaces: number;
+	};
+}
+export type WorkerKind = keyof WorkerConfigs;
+
+/**
+ * A machine that runs jobs (e.g. firmware builds) for this server, set up by an admin (/admin).
+ * Everything that depends on the `kind` lives in `config`, so new kinds need no migration.
+ */
+export const worker = sqliteTable('worker', {
+	id: text('id')
+		.primaryKey()
+		.$defaultFn(() => crypto.randomUUID()),
+	name: text('name').notNull(),
+	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+	kind: text('kind').$type<WorkerKind>().notNull(),
+	config: text('config', { mode: 'json' }).$type<WorkerConfigs[WorkerKind]>().notNull(),
+	...timestamps
+});
+
+/** A `worker` row with `config` narrowed by `kind`. */
+export type Worker = Omit<typeof worker.$inferSelect, 'kind' | 'config'> &
+	{ [K in WorkerKind]: { kind: K; config: WorkerConfigs[K] } }[WorkerKind];
+
+/** Server-wide settings an admin can change, one row per key (see `server/settings.ts`). */
+export const setting = sqliteTable('setting', {
+	key: text('key').primaryKey(),
+	value: text('value', { mode: 'json' }).notNull(),
+	...timestamps
+});
+
 export * from './auth.schema';
