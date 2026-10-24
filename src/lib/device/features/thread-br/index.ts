@@ -125,7 +125,11 @@ export default {
 				// The border router installs its own route hook.
 				CONFIG_ENABLE_ROUTE_HOOK: false,
 				CONFIG_USE_MINIMAL_MDNS: false,
-				CONFIG_MDNS_MULTIPLE_INSTANCE: true
+				CONFIG_MDNS_MULTIPLE_INSTANCE: true,
+				// The SRP server republishes every Thread node's service via mDNS. With the default of 10
+				// the table fills after a handful of nodes; the rest get no SRP registration and can't be
+				// reached (commissioning fails at FindOperational). Room for 32 nodes plus the hub's own.
+				CONFIG_MDNS_MAX_SERVICES: 64
 			},
 			compileOptions: ['-D_NO_GENERIC_THREAD_NETWORK_COMMISSIONING_DRIVER_'],
 			defines: {
