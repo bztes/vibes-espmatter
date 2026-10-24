@@ -210,8 +210,8 @@ describe('generator', () => {
 		expect(host.files['main/CMakeLists.txt']).toContain(
 			'EMBED_FILES "dashboard.html.gz" "admin.html.gz"'
 		);
-		// in menu order: the admin dashboard first
-		const [admin, dash] = host.ui;
+		// in menu order (by path): the user dashboard at `/` first
+		const [dash, admin] = host.ui;
 		expect(admin.page).toBe('admin');
 		expect(admin.layout).toBe('features/admin-dashboard/device-ui/SetupLayout.svelte');
 		expect(admin.panels.map((p) => p.module)).toContain(

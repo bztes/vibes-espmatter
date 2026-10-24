@@ -448,12 +448,14 @@ export function featureServices(featureIds: string[], board = DEFAULT_BOARD): Se
 	);
 }
 
-/** The pages of the web interface the chip's features registered (`devicePages`), in menu order. */
+/**
+ * The pages of the web interface the chip's features registered (`devicePages`), in menu order
+ * (by path).
+ */
 function chipPages(services: Services): (DevicePage & { dir: string })[] {
-	return (services.find(devicePages)?.entries() ?? []).map(({ feature, item }) => ({
-		...item,
-		dir: feature.dir
-	}));
+	return (services.find(devicePages)?.entries() ?? [])
+		.map(({ feature, item }) => ({ ...item, dir: feature.dir }))
+		.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
 /** The REST API routes a chip's features registered (`deviceApi`), in hook order, with the feature's name. */
