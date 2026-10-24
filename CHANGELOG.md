@@ -1,5 +1,17 @@
 # vibes-espmatter
 
+## 0.2.1
+
+### Patch Changes
+
+- [`d925baf`](https://github.com/bztes/vibes-espmatter/commit/d925baf38b9f7956284ec083ecbf0f93d781df38) Thanks [@bztes](https://github.com/bztes)! - The page menu of the device web interface is now ordered by path, so the dashboard comes before Setup.
+
+- [`1346bab`](https://github.com/bztes/vibes-espmatter/commit/1346bab43f1be2b35a0fd8ff8074575c04ccb3d3) Thanks [@bztes](https://github.com/bztes)! - The device web interface no longer shows the page tabs in its header: the pages (Dashboard, Setup) are now in the user menu.
+
+- [`086a314`](https://github.com/bztes/vibes-espmatter/commit/086a314df58658e02922b98c6b5e381ea66f1dac) Thanks [@bztes](https://github.com/bztes)! - Renaming a Matter device now drops spaces at the start and end of the new name.
+
+- [`0eb68f8`](https://github.com/bztes/vibes-espmatter/commit/0eb68f811b351e9776849bd09a65ee6a47ce793a) Thanks [@bztes](https://github.com/bztes)! - Fix commissioning of Thread devices failing with `CHIP_ERROR_TIMEOUT` at `FindOperationalForStayActive` once a few Thread nodes are paired: the Thread border router now has room for 64 mDNS services (was 10), so every node's SRP registration is published.
+
 ## 0.2.0
 
 ### Minor Changes
