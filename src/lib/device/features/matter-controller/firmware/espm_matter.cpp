@@ -888,6 +888,9 @@ static esp_err_t node_action_handler(httpd_req_t *req)
     if (action == "rename") {
         std::string name;
         mesp_web_param(body, "name", name);
+        // Blanks around the name are dropped.
+        size_t a = name.find_first_not_of(" \t"), b = name.find_last_not_of(" \t");
+        name = a == std::string::npos ? "" : name.substr(a, b - a + 1);
         NodesLock lock;
 #if MESP_OTEL
         otel_forget(idx);
