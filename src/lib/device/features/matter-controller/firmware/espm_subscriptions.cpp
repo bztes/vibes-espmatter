@@ -205,6 +205,21 @@ static void on_event(uint64_t node, const chip::app::EventHeader &header, chip::
 
 static void subscribe(size_t idx);
 
+/**
+ * A subscription that tells when the connection to the device is lost (no report within the max
+ * interval), not only when it gave up resubscribing: its values must not be sent as current then.
+ */
+class tracked_subscription : public controller::subscribe_command {
+public:
+    using controller::subscribe_command::subscribe_command;
+
+    CHIP_ERROR OnResubscriptionNeeded(chip::app::ReadClient *client, CHIP_ERROR cause) override
+    {
+        mesp_matter_node_lost(client->GetPeerNodeId());
+        return controller::subscribe_command::OnResubscriptionNeeded(client, cause);
+    }
+};
+
 static void retry_timer(chip::System::Layer *, void *)
 {
     Lock lock;
@@ -226,6 +241,7 @@ static void on_sub_done(uint64_t node, uint32_t)
     int idx = sub_index_by_node(node);
     if (idx < 0) return;
     ESP_LOGW(TAG, "Subscription to node 0x%llx ended, retrying in %d s", (unsigned long long)node, RESUBSCRIBE_S);
+    mesp_matter_node_lost(node);
     schedule_retry(idx);
 }
 
@@ -236,6 +252,7 @@ static void on_sub_failure(void *cmd)
         if (s_subs[i].cmd == cmd) {
             ESP_LOGW(TAG, "Could not reach node 0x%llx, retrying in %d s", (unsigned long long)s_subs[i].node,
                      RESUBSCRIBE_S);
+            mesp_matter_node_lost(s_subs[i].node);
             schedule_retry(i);
         }
     }
@@ -282,9 +299,8 @@ static void subscribe(size_t idx)
         attrs[n++] = AttributePathParams(ElectricalEnergyMeasurement::Id,
                                          ElectricalEnergyMeasurement::Attributes::CumulativeEnergyImported::Id);
     }
-    auto *cmd = chip::Platform::New<controller::subscribe_command>(sub.node, std::move(attrs), std::move(events), 0,
-                                                                   300, true, on_attribute, on_event, on_sub_done,
-                                                                   on_sub_failure);
+    auto *cmd = chip::Platform::New<tracked_subscription>(sub.node, std::move(attrs), std::move(events), 0, 300, true,
+                                                          on_attribute, on_event, on_sub_done, on_sub_failure);
     if (!cmd) return schedule_retry(idx);
     sub.cmd = cmd;
     sub.state = SUB_PENDING;

@@ -58,6 +58,11 @@ class TLVReader;
  */
 void mesp_matter_attribute_report(uint64_t node_id, const chip::app::ConcreteDataAttributePath &path,
                                   chip::TLV::TLVReader *data);
+/**
+ * The connection to a node is lost (its subscription broke off): its values are no longer sent as
+ * metrics, until it reports again.
+ */
+void mesp_matter_node_lost(uint64_t node_id);
 /** FeatureMap of the Switch cluster of an endpoint, once reported; 0 if unknown. */
 uint32_t mesp_matter_switch_features(uint64_t node_id, uint16_t ep);
 

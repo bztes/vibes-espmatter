@@ -65,6 +65,8 @@ static mesp_node_t s_nodes[MESP_MAX_NODES];
 /** Tags an admin gave a node, comma-separated ("Living room,Kitchen"). Own NVS blob: the node blob keeps its layout. */
 static char s_tags[MESP_MAX_NODES][64];
 static int64_t s_last_seen[MESP_MAX_NODES]; // runtime only, esp_timer µs
+/** Connection lost (mesp_matter_node_lost()) and no report since: its values aren't current. Runtime only. */
+static bool s_offline[MESP_MAX_NODES];
 
 /** Last known light state per endpoint (runtime only, -1 = unknown). Filled by read_node_state(). */
 struct mesp_light_t {
@@ -194,9 +196,13 @@ static void otel_attrs(int idx, uint16_t ep, char *out, size_t len)
              name);
 }
 
-/** The node's last known values as metrics; battery, power and energy are the node's (ep 0). Must hold the nodes lock. */
+/**
+ * The node's last known values as metrics; battery, power and energy are the node's (ep 0). Not
+ * while it's offline: they may be outdated. Must hold the nodes lock.
+ */
 static void otel_record(int idx)
 {
+    if (s_offline[idx]) return;
     char attrs[80];
     const mesp_battery_t &bat = s_battery[idx];
     otel_attrs(idx, 0, attrs, sizeof(attrs));
@@ -395,9 +401,22 @@ static void on_attribute(uint64_t node_id, const ConcreteDataAttributePath &path
     NodesLock lock;
     int idx = node_index(node_id);
     if (idx < 0) return;
+    s_offline[idx] = false; // it answered
     store_attribute(idx, path, data);
 #if MESP_OTEL
     otel_record(idx);
+#endif
+}
+
+void mesp_matter_node_lost(uint64_t node_id)
+{
+    NodesLock lock;
+    int idx = node_index(node_id);
+    if (idx < 0 || s_offline[idx]) return;
+    ESP_LOGI(TAG, "Node 0x%llx is offline", (unsigned long long)node_id);
+    s_offline[idx] = true;
+#if MESP_OTEL
+    otel_forget(idx);
 #endif
 }
 
@@ -571,6 +590,7 @@ static void on_commissioning_success(chip::ScopedNodeId peer)
             node.network = s_pair.network;
             s_tags[s_node_count][0] = '\0';
             s_last_seen[s_node_count] = esp_timer_get_time();
+            s_offline[s_node_count] = false;
             memset(s_light[s_node_count], 0xff, sizeof(s_light[s_node_count]));
             memset(s_measure[s_node_count], 0, sizeof(s_measure[s_node_count]));
             memset(s_switch_features[s_node_count], 0, sizeof(s_switch_features[s_node_count]));
@@ -972,6 +992,7 @@ static esp_err_t node_action_handler(httpd_req_t *req)
         for (size_t i = idx; i + 1 < s_node_count; i++) {
             s_nodes[i] = s_nodes[i + 1];
             s_last_seen[i] = s_last_seen[i + 1];
+            s_offline[i] = s_offline[i + 1];
             memcpy(s_light[i], s_light[i + 1], sizeof(s_light[i]));
             memcpy(s_measure[i], s_measure[i + 1], sizeof(s_measure[i]));
             memcpy(s_switch_features[i], s_switch_features[i + 1], sizeof(s_switch_features[i]));
