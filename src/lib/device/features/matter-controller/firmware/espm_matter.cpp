@@ -96,11 +96,16 @@ struct mesp_battery_t {
 };
 static mesp_battery_t s_battery[MESP_MAX_NODES];
 
-/** Last read power draw of a node (Electrical Power Measurement, runtime only). Often on its own endpoint. */
+/**
+ * Last read power draw (Electrical Power Measurement) and energy total (Electrical Energy
+ * Measurement) of a node, runtime only. Often on an endpoint of their own.
+ */
 struct mesp_power_t {
-    int64_t mw;      // ActivePower in mW
-    uint16_t ep;     // endpoint that reported it
-    int64_t updated; // esp_timer µs, 0 = never read
+    int64_t mw;             // ActivePower in mW
+    uint16_t ep;            // endpoint that reported it
+    int64_t updated;        // esp_timer µs, 0 = never read
+    int64_t energy_mwh;     // CumulativeEnergyImported in mWh
+    int64_t energy_updated; // esp_timer µs, 0 = never read
 };
 static mesp_power_t s_power[MESP_MAX_NODES];
 
@@ -189,7 +194,7 @@ static void otel_attrs(int idx, uint16_t ep, char *out, size_t len)
              name);
 }
 
-/** The node's last known values as metrics. Must hold the nodes lock. */
+/** The node's last known values as metrics; battery, power and energy are the node's (ep 0). Must hold the nodes lock. */
 static void otel_record(int idx)
 {
     char attrs[80];
@@ -197,6 +202,12 @@ static void otel_record(int idx)
     otel_attrs(idx, 0, attrs, sizeof(attrs));
     if (bat.updated && bat.percent_x2 >= 0) mesp_otel_gauge("matter.battery", "%", bat.percent_x2 / 2.0, attrs);
     else if (bat.updated) mesp_otel_remove("matter.battery", attrs);
+    // 0 ok, 1 warning, 2 critical – also from devices that don't report a percentage.
+    if (bat.updated && bat.level >= 0) mesp_otel_gauge("matter.battery.level", "1", bat.level, attrs);
+    else if (bat.updated) mesp_otel_remove("matter.battery.level", attrs);
+    if (s_power[idx].updated) mesp_otel_gauge("matter.power", "W", s_power[idx].mw / 1000.0, attrs);
+    if (s_power[idx].energy_updated)
+        mesp_otel_counter("matter.energy.imported", "kWh", s_power[idx].energy_mwh / 1e6, attrs);
     for (uint8_t i = 0; i < s_nodes[idx].ep_count; i++) {
         const mesp_measure_t &m = s_measure[idx][i];
         const mesp_light_t &light = s_light[idx][i];
@@ -204,6 +215,8 @@ static void otel_record(int idx)
         if (m.temp_at) mesp_otel_gauge("matter.temperature", "Cel", m.temp / 100.0, attrs);
         if (m.humidity_at) mesp_otel_gauge("matter.humidity", "%", m.humidity / 100.0, attrs);
         if (light.on >= 0) mesp_otel_gauge("matter.onoff", "1", light.on, attrs);
+        if (light.level >= 0) mesp_otel_gauge("matter.brightness", "%", light.level * 100.0 / 254, attrs);
+        if (light.ct > 0) mesp_otel_gauge("matter.color_temperature", "K", 1e6 / light.ct, attrs);
     }
 }
 
@@ -212,10 +225,12 @@ static void otel_forget(int idx)
 {
     char attrs[80];
     otel_attrs(idx, 0, attrs, sizeof(attrs));
-    mesp_otel_remove("matter.battery", attrs);
+    for (const char *name : {"matter.battery", "matter.battery.level", "matter.power", "matter.energy.imported"})
+        mesp_otel_remove(name, attrs);
     for (uint8_t i = 0; i < s_nodes[idx].ep_count; i++) {
         otel_attrs(idx, s_nodes[idx].ep[i], attrs, sizeof(attrs));
-        for (const char *name : {"matter.temperature", "matter.humidity", "matter.onoff"})
+        for (const char *name : {"matter.temperature", "matter.humidity", "matter.onoff", "matter.brightness",
+                                 "matter.color_temperature"})
             mesp_otel_remove(name, attrs);
     }
 }
@@ -249,7 +264,19 @@ static void store_attribute(int idx, const ConcreteDataAttributePath &path, chip
         if (path.mAttributeId != ElectricalPowerMeasurement::Attributes::ActivePower::Id) return;
         chip::app::DataModel::Nullable<int64_t> v;
         if (chip::app::DataModel::Decode(reader, v) != CHIP_NO_ERROR || v.IsNull()) return;
-        s_power[idx] = {v.Value(), path.mEndpointId, esp_timer_get_time()};
+        mesp_power_t &power = s_power[idx];
+        power.mw = v.Value();
+        power.ep = path.mEndpointId;
+        power.updated = esp_timer_get_time();
+        return;
+    }
+
+    if (path.mClusterId == ElectricalEnergyMeasurement::Id) {
+        if (path.mAttributeId != ElectricalEnergyMeasurement::Attributes::CumulativeEnergyImported::Id) return;
+        ElectricalEnergyMeasurement::Attributes::CumulativeEnergyImported::TypeInfo::DecodableType v;
+        if (chip::app::DataModel::Decode(reader, v) != CHIP_NO_ERROR || v.IsNull()) return;
+        s_power[idx].energy_mwh = v.Value().energy;
+        s_power[idx].energy_updated = esp_timer_get_time();
         return;
     }
 
@@ -463,7 +490,8 @@ void mesp_matter_attribute_report(uint64_t node_id, const ConcreteDataAttributeP
 {
     if (path.mClusterId == PowerSource::Id || path.mClusterId == TemperatureMeasurement::Id ||
         path.mClusterId == RelativeHumidityMeasurement::Id || path.mClusterId == OnOff::Id ||
-        path.mClusterId == Switch::Id) {
+        path.mClusterId == LevelControl::Id || path.mClusterId == ColorControl::Id || path.mClusterId == Switch::Id ||
+        path.mClusterId == ElectricalPowerMeasurement::Id || path.mClusterId == ElectricalEnergyMeasurement::Id) {
         on_attribute(node_id, path, data);
     }
 }
@@ -694,12 +722,12 @@ static void on_state_read_done(uint64_t node_id, const ScopedMemoryBufferWithSiz
     if (idx >= 0) s_last_seen[idx] = esp_timer_get_time();
 }
 
-/** Read on/off, brightness, color temperature, power and sensor values of all endpoints. Must hold the CHIP stack lock. */
+/** Read on/off, brightness, color temperature, power, energy and sensor values of all endpoints. Must hold the CHIP stack lock. */
 static esp_err_t read_node_state(uint64_t node_id)
 {
     ScopedMemoryBufferWithSize<AttributePathParams> attrs;
     ScopedMemoryBufferWithSize<EventPathParams> events;
-    attrs.Alloc(8);
+    attrs.Alloc(9);
     if (!attrs.Get()) return ESP_ERR_NO_MEM;
     // Wildcard endpoint: devices answer only for endpoints that have the cluster.
     attrs[0] = AttributePathParams(OnOff::Id, OnOff::Attributes::OnOff::Id);
@@ -711,6 +739,8 @@ static esp_err_t read_node_state(uint64_t node_id)
     attrs[6] = AttributePathParams(RelativeHumidityMeasurement::Id,
                                    RelativeHumidityMeasurement::Attributes::MeasuredValue::Id);
     attrs[7] = AttributePathParams(ElectricalPowerMeasurement::Id, ElectricalPowerMeasurement::Attributes::ActivePower::Id);
+    attrs[8] = AttributePathParams(ElectricalEnergyMeasurement::Id,
+                                   ElectricalEnergyMeasurement::Attributes::CumulativeEnergyImported::Id);
     auto *cmd = chip::Platform::New<controller::read_command>(node_id, std::move(attrs), std::move(events),
                                                               on_attribute, on_state_read_done, nullptr);
     if (!cmd) return ESP_ERR_NO_MEM;

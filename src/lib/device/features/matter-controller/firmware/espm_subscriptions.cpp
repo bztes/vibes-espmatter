@@ -30,25 +30,37 @@ using chip::app::AttributePathParams;
 using chip::app::EventPathParams;
 using chip::Platform::ScopedMemoryBufferWithSize;
 
-#define DEVICE_TYPE_GENERIC_SWITCH 0x000F
-#define DEVICE_TYPE_TEMPERATURE_SENSOR 0x0302
-#define DEVICE_TYPE_HUMIDITY_SENSOR 0x0307
+/**
+ * What a subscription asks for. Only what the node's device types have: Matter guarantees just 3
+ * attribute paths per subscription, so a small device may refuse a longer list.
+ */
+enum : uint8_t {
+    WANT_SWITCH = 0x01,      // FeatureMap of the Switch cluster and its events
+    WANT_BATTERY = 0x02,     // percentage and charge level (2 paths)
+    WANT_TEMPERATURE = 0x04,
+    WANT_HUMIDITY = 0x08,
+    WANT_ON_OFF = 0x10,
+    WANT_LEVEL = 0x20,       // brightness
+    WANT_COLOR = 0x40,       // color temperature
+    WANT_ENERGY = 0x80,      // power draw and energy total (2 paths)
+};
 
-/** Lights and plugs (they have the On/Off cluster): subscribed for their on/off state. */
-static bool is_on_off_device(uint32_t type)
+/** What a device type has; 0 = not subscribed. */
+static uint8_t wanted(uint32_t type)
 {
     switch (type) {
-    case 0x0100: // On/Off Light
-    case 0x0101: // Dimmable Light
-    case 0x010C: // Color Temperature Light
-    case 0x010D: // Extended Color Light
-    case 0x010A: // On/Off Plug-in Unit
-    case 0x010B: // Dimmable Plug-in Unit
-    case 0x010F: // Mounted On/Off Control
-    case 0x0110: // Mounted Dimmable Load Control
-        return true;
-    default:
-        return false;
+    case 0x000F: return WANT_SWITCH | WANT_BATTERY;      // Generic Switch
+    case 0x0302: return WANT_TEMPERATURE | WANT_BATTERY; // Temperature Sensor
+    case 0x0307: return WANT_HUMIDITY | WANT_BATTERY;    // Humidity Sensor
+    case 0x0100: return WANT_ON_OFF;                     // On/Off Light
+    case 0x0101: return WANT_ON_OFF | WANT_LEVEL;        // Dimmable Light
+    case 0x010C:                                         // Color Temperature Light
+    case 0x010D: return WANT_ON_OFF | WANT_LEVEL | WANT_COLOR; // Extended Color Light
+    case 0x010A:                                         // On/Off Plug-in Unit
+    case 0x010F: return WANT_ON_OFF | WANT_ENERGY;       // Mounted On/Off Control
+    case 0x010B:                                         // Dimmable Plug-in Unit
+    case 0x0110: return WANT_ON_OFF | WANT_LEVEL | WANT_ENERGY; // Mounted Dimmable Load Control
+    default: return 0;
     }
 }
 /** As many as nodes (espm_matter.cpp): lights and plugs are subscribed too. */
@@ -65,14 +77,16 @@ static bool is_on_off_device(uint32_t type)
 
 /**
  * One subscription per node with switches (button events), sensors (temperature, humidity for
- * the dashboard) or lights and plugs (on/off, e.g. for OpenTelemetry). Switches and sensors are
- * mostly battery-powered and sleepy: they report, we don't poll them.
+ * the dashboard) or lights and plugs (on/off, brightness, color temperature, power and energy, e.g.
+ * for OpenTelemetry). Switches and sensors are mostly battery-powered and sleepy: they report, we
+ * don't poll them.
  */
 enum : uint8_t { SUB_PENDING, SUB_ACTIVE, SUB_RETRY };
 static struct {
     uint64_t node;
     void *cmd;
     uint8_t state;
+    uint8_t wants;        // WANT_* of all its endpoints
     bool last_known;
     uint64_t last_event;  // highest event number handled (persisted)
     int64_t ignore_until; // esp_timer µs: history of a switch we never heard from before
@@ -233,22 +247,41 @@ static void subscribe(size_t idx)
     auto &sub = s_subs[idx];
     ScopedMemoryBufferWithSize<AttributePathParams> attrs;
     ScopedMemoryBufferWithSize<EventPathParams> events;
-    attrs.Alloc(6);
-    events.Alloc(1);
-    if (!attrs.Get() || !events.Get()) return schedule_retry(idx);
-    // All endpoints (a node answers only for the clusters it has): FeatureMap of the Switch cluster
-    // and all its events, reported immediately.
-    attrs[0] = AttributePathParams(Switch::Id, Switch::Attributes::FeatureMap::Id);
+    const uint8_t w = sub.wants;
+    attrs.Alloc(__builtin_popcount(w) + !!(w & WANT_BATTERY) + !!(w & WANT_ENERGY));
+    if (w & WANT_SWITCH) events.Alloc(1);
+    if (!attrs.Get() || ((w & WANT_SWITCH) && !events.Get())) return schedule_retry(idx);
+    // All endpoints (a node answers only for the clusters it has).
+    size_t n = 0;
+    // FeatureMap of the Switch cluster and all its events, reported immediately.
+    if (w & WANT_SWITCH) {
+        attrs[n++] = AttributePathParams(Switch::Id, Switch::Attributes::FeatureMap::Id);
+        events[0] = EventPathParams(chip::kInvalidEndpointId, Switch::Id, chip::kInvalidEventId, true);
+    }
     // Battery for the device list – switches and sensors are mostly battery-powered and sleepy, so let them report it.
-    attrs[1] = AttributePathParams(PowerSource::Id, PowerSource::Attributes::BatPercentRemaining::Id);
-    attrs[2] = AttributePathParams(PowerSource::Id, PowerSource::Attributes::BatChargeLevel::Id);
+    if (w & WANT_BATTERY) {
+        attrs[n++] = AttributePathParams(PowerSource::Id, PowerSource::Attributes::BatPercentRemaining::Id);
+        attrs[n++] = AttributePathParams(PowerSource::Id, PowerSource::Attributes::BatChargeLevel::Id);
+    }
     // Sensor values for the dashboard (stored by the node registry).
-    attrs[3] = AttributePathParams(TemperatureMeasurement::Id, TemperatureMeasurement::Attributes::MeasuredValue::Id);
-    attrs[4] = AttributePathParams(RelativeHumidityMeasurement::Id,
-                                   RelativeHumidityMeasurement::Attributes::MeasuredValue::Id);
-    // On/off of lights and plugs, also when switched elsewhere (their own button, another controller).
-    attrs[5] = AttributePathParams(OnOff::Id, OnOff::Attributes::OnOff::Id);
-    events[0] = EventPathParams(chip::kInvalidEndpointId, Switch::Id, chip::kInvalidEventId, true);
+    if (w & WANT_TEMPERATURE)
+        attrs[n++] = AttributePathParams(TemperatureMeasurement::Id, TemperatureMeasurement::Attributes::MeasuredValue::Id);
+    if (w & WANT_HUMIDITY)
+        attrs[n++] = AttributePathParams(RelativeHumidityMeasurement::Id,
+                                         RelativeHumidityMeasurement::Attributes::MeasuredValue::Id);
+    // State of lights and plugs, also when switched elsewhere (their own button, another controller).
+    if (w & WANT_ON_OFF) attrs[n++] = AttributePathParams(OnOff::Id, OnOff::Attributes::OnOff::Id);
+    if (w & WANT_LEVEL) attrs[n++] = AttributePathParams(LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id);
+    if (w & WANT_COLOR)
+        attrs[n++] = AttributePathParams(ColorControl::Id, ColorControl::Attributes::ColorTemperatureMireds::Id);
+    // Power draw of plugs that measure it (often on an endpoint of its own), and their energy total,
+    // sent as a counter (the plug keeps it, so nothing is lost while we're offline).
+    if (w & WANT_ENERGY) {
+        attrs[n++] = AttributePathParams(ElectricalPowerMeasurement::Id,
+                                         ElectricalPowerMeasurement::Attributes::ActivePower::Id);
+        attrs[n++] = AttributePathParams(ElectricalEnergyMeasurement::Id,
+                                         ElectricalEnergyMeasurement::Attributes::CumulativeEnergyImported::Id);
+    }
     auto *cmd = chip::Platform::New<controller::subscribe_command>(sub.node, std::move(attrs), std::move(events), 0,
                                                                    300, true, on_attribute, on_event, on_sub_done,
                                                                    on_sub_failure);
@@ -263,7 +296,7 @@ static void subscribe(size_t idx)
     } else if (sub.state == SUB_PENDING) {
         sub.state = SUB_ACTIVE; // unless the connection already failed synchronously
     }
-    ESP_LOGI(TAG, "Subscribing to node 0x%llx", (unsigned long long)sub.node);
+    ESP_LOGI(TAG, "Subscribing to node 0x%llx (%u attributes)", (unsigned long long)sub.node, (unsigned)n);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -291,19 +324,33 @@ void mesp_matter_subscriptions_update()
     Lock lock;
     static mesp_endpoint_ref eps[MESP_MAX_ENDPOINT_REFS]; // 4 KB: too much for the CHIP task stack
     size_t n = mesp_matter_endpoints(eps, MESP_MAX_ENDPOINT_REFS);
+    // What each node's endpoints have together (a plug may also be a temperature sensor).
+    uint8_t wants[MAX_SUBS] = {};
+    const size_t known = s_sub_count;
     for (size_t i = 0; i < n; i++) {
-        const uint32_t type = eps[i].device_type;
-        if (type != DEVICE_TYPE_GENERIC_SWITCH && type != DEVICE_TYPE_TEMPERATURE_SENSOR &&
-            type != DEVICE_TYPE_HUMIDITY_SENSOR && !is_on_off_device(type)) {
-            continue;
-        }
-
-        if (sub_index_by_node(eps[i].node_id) < 0 && s_sub_count < MAX_SUBS) {
+        const uint8_t w = wanted(eps[i].device_type);
+        if (!w) continue;
+        int idx = sub_index_by_node(eps[i].node_id);
+        if (idx < 0 && s_sub_count < MAX_SUBS) {
             auto &sub = s_subs[s_sub_count];
             memset(&sub, 0, sizeof(sub));
             sub.node = eps[i].node_id;
             sub.last_known = last_event_load(sub.node, sub.last_event);
-            subscribe(s_sub_count++);
+            idx = s_sub_count++;
+        }
+        if (idx >= 0) wants[idx] |= w;
+    }
+    for (size_t i = 0; i < s_sub_count; i++) {
+        auto &sub = s_subs[i];
+        if (!wants[i] || wants[i] == sub.wants) continue;
+        sub.wants = wants[i];
+        if (i >= known) {
+            subscribe(i);
+        } else if (sub.state != SUB_RETRY) {
+            // Its device types changed (e.g. after a firmware update): ending the subscription
+            // makes on_sub_done() subscribe again with the new list. A retry picks it up anyway.
+            ESP_LOGI(TAG, "Node 0x%llx has other device types now", (unsigned long long)sub.node);
+            controller::send_shutdown_subscriptions(sub.node);
         }
     }
 }
