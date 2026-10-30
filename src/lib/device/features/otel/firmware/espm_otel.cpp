@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <map>
 #include <string>
 #include <sys/time.h>
 
@@ -50,8 +51,9 @@
 
 static const char *TAG = "mesp_otel";
 
-/** Room for the system metrics, a heat pump and the controller's nodes (a few per node). */
-#define MAX_METRICS 128
+/** At most this many metrics (the system metrics, a heat pump, a few per Matter device …); more with PSRAM. */
+#define MAX_METRICS_PSRAM 512
+#define MAX_METRICS 192
 /** Longest log line kept (longer ones are cut); formatted on the stack of the logging task. */
 #define LOG_LINE_MAX 160
 /** Log lines kept until sent: more with PSRAM. */
@@ -73,12 +75,21 @@ static const char *TAG = "mesp_otel";
 #define LOGS_PER_PUSH 48
 #define LOG_PUSHES_PER_ROUND 4
 
-struct metric_t {
-    bool used;
-    bool counter;
+/** A metric is identified by its name and attributes (`key=value;…`). */
+struct metric_key_t {
     char name[48];
-    char unit[12];
     char attrs[96];
+    /** By name first: the data points of a name are next to each other. */
+    bool operator<(const metric_key_t &o) const
+    {
+        const int c = strcmp(name, o.name);
+        return c ? c < 0 : strcmp(attrs, o.attrs) < 0;
+    }
+};
+
+struct metric_t {
+    bool counter;
+    char unit[12];
     double value;
     /** Counters: when the total started (first seen or last reset), esp_timer time. */
     int64_t start_us;
@@ -109,8 +120,26 @@ struct status_t {
     bool online;
 };
 
-/** MAX_METRICS entries, in PSRAM if the board has it (about 180 bytes each). */
-static metric_t *s_metrics;
+/** Allocates in PSRAM if the board has it: map entries are small, malloc would keep them internal. */
+template <class T> struct prefer_psram {
+    using value_type = T;
+    prefer_psram() = default;
+    template <class U> prefer_psram(const prefer_psram<U> &) {}
+    T *allocate(size_t n)
+    {
+        void *p = heap_caps_malloc_prefer(n * sizeof(T), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT);
+        if (!p) abort(); // like new without exceptions
+        return (T *)p;
+    }
+    void deallocate(T *p, size_t) { heap_caps_free(p); }
+    template <class U> bool operator==(const prefer_psram<U> &) const { return true; }
+    template <class U> bool operator!=(const prefer_psram<U> &) const { return false; }
+};
+
+/** The latest value of each metric (about 200 bytes each). */
+using metric_map_t =
+    std::map<metric_key_t, metric_t, std::less<metric_key_t>, prefer_psram<std::pair<const metric_key_t, metric_t>>>;
+static metric_map_t *s_metrics;
 static settings_t s_settings;
 static status_t s_status = {"clock", "", 0, "", 0};
 /** Guards the metric table, the settings and the status. */
@@ -128,41 +157,37 @@ public:
 // Metric table
 // ---------------------------------------------------------------------------------------------
 
-/** Must hold the lock. */
-static metric_t *find(const char *name, const char *attrs)
+static metric_key_t make_key(const char *name, const char *attrs)
 {
-    for (int i = 0; i < MAX_METRICS; i++) {
-        metric_t &m = s_metrics[i];
-        if (m.used && strcmp(m.name, name) == 0 && strcmp(m.attrs, attrs) == 0) return &m;
-    }
-    return nullptr;
+    metric_key_t key;
+    strlcpy(key.name, name, sizeof(key.name));
+    strlcpy(key.attrs, attrs ? attrs : "", sizeof(key.attrs));
+    return key;
 }
 
 static void record(const char *name, const char *unit, double value, const char *attrs, bool counter)
 {
     if (!s_metrics || !name || !std::isfinite(value)) return;
-    if (!attrs) attrs = "";
+    const metric_key_t key = make_key(name, attrs);
     Lock lock;
-    metric_t *m = find(name, attrs);
-    if (!m) {
-        for (int i = 0; i < MAX_METRICS && !m; i++)
-            if (!s_metrics[i].used) m = &s_metrics[i];
-        if (!m) {
-            if (!s_full_logged) ESP_LOGW(TAG, "More than %d metrics, dropping %s", MAX_METRICS, name);
+    auto it = s_metrics->find(key);
+    if (it == s_metrics->end()) {
+        const bool psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
+        const size_t limit = psram ? MAX_METRICS_PSRAM : MAX_METRICS;
+        if (s_metrics->size() >= limit) {
+            if (!s_full_logged) ESP_LOGW(TAG, "More than %d metrics, dropping %s", (int)limit, name);
             s_full_logged = true;
             return;
         }
-        *m = {};
-        m->used = true;
-        strlcpy(m->name, name, sizeof(m->name));
-        strlcpy(m->attrs, attrs, sizeof(m->attrs));
-        m->start_us = esp_timer_get_time();
-    } else if (counter && value < m->value) {
-        m->start_us = esp_timer_get_time();
+        it = s_metrics->emplace(key, metric_t{}).first;
+        it->second.start_us = esp_timer_get_time();
+    } else if (counter && value < it->second.value) {
+        it->second.start_us = esp_timer_get_time();
     }
-    m->counter = counter;
-    strlcpy(m->unit, unit ? unit : "", sizeof(m->unit));
-    m->value = value;
+    metric_t &m = it->second;
+    m.counter = counter;
+    strlcpy(m.unit, unit ? unit : "", sizeof(m.unit));
+    m.value = value;
 }
 
 void mesp_otel_gauge(const char *name, const char *unit, double value, const char *attrs)
@@ -178,8 +203,9 @@ void mesp_otel_counter(const char *name, const char *unit, double total, const c
 void mesp_otel_remove(const char *name, const char *attrs)
 {
     if (!s_metrics || !name) return;
+    const metric_key_t key = make_key(name, attrs);
     Lock lock;
-    if (metric_t *m = find(name, attrs ? attrs : "")) m->used = false;
+    s_metrics->erase(key);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -325,7 +351,7 @@ static void json_attr(std::string &out, const char *key, const char *value)
 /** `key=value;key=value` → attribute list (without the brackets). */
 static void json_attrs(std::string &out, const char *attrs)
 {
-    char buf[sizeof(metric_t::attrs)];
+    char buf[sizeof(metric_key_t::attrs)];
     strlcpy(buf, attrs, sizeof(buf));
     bool first = true;
     char *save = nullptr;
@@ -384,39 +410,35 @@ static std::string build_request()
     out += ",\"scopeMetrics\":[{\"scope\":{\"name\":\"vibes-espmatter\"},\"metrics\":[";
 
     Lock lock;
-    bool done[MAX_METRICS] = {};
-    bool any = false;
-    for (int i = 0; i < MAX_METRICS; i++) {
-        const metric_t &head = s_metrics[i];
-        if (!head.used || done[i]) continue;
-        if (any) out += ',';
-        any = true;
-        out += "{\"name\":";
-        json_str(out, head.name);
-        out += ",\"unit\":";
-        json_str(out, head.unit);
-        out += head.counter ? ",\"sum\":{\"aggregationTemporality\":2,\"isMonotonic\":true,\"dataPoints\":["
-                            : ",\"gauge\":{\"dataPoints\":[";
-        bool first_point = true;
-        for (int j = i; j < MAX_METRICS; j++) {
-            const metric_t &m = s_metrics[j];
-            if (!m.used || done[j] || m.counter != head.counter || strcmp(m.name, head.name) != 0) continue;
-            done[j] = true;
-            if (!first_point) out += ',';
-            first_point = false;
-            out += "{\"attributes\":[";
-            json_attrs(out, m.attrs);
-            out += ']';
-            if (m.counter) json_ns(out, "startTimeUnixNano", boot_ns + m.start_us * 1000LL);
-            json_ns(out, "timeUnixNano", now);
-            char value[32];
-            snprintf(value, sizeof(value), ",\"asDouble\":%.10g}", m.value);
-            out += value;
+    if (s_metrics->empty()) return {};
+    // In order of the names: a new metric begins where the name (or kind) changes.
+    const metric_key_t *head = nullptr;
+    bool head_counter = false;
+    for (const auto &[key, m] : *s_metrics) {
+        if (head && strcmp(head->name, key.name) == 0 && head_counter == m.counter) {
+            out += ',';
+        } else {
+            if (head) out += "]}},";
+            head = &key;
+            head_counter = m.counter;
+            out += "{\"name\":";
+            json_str(out, key.name);
+            out += ",\"unit\":";
+            json_str(out, m.unit);
+            out += m.counter ? ",\"sum\":{\"aggregationTemporality\":2,\"isMonotonic\":true,\"dataPoints\":["
+                             : ",\"gauge\":{\"dataPoints\":[";
         }
-        out += "]}}";
+        out += "{\"attributes\":[";
+        json_attrs(out, key.attrs);
+        out += ']';
+        if (m.counter) json_ns(out, "startTimeUnixNano", boot_ns + m.start_us * 1000LL);
+        json_ns(out, "timeUnixNano", now);
+        char value[32];
+        snprintf(value, sizeof(value), ",\"asDouble\":%.10g}", m.value);
+        out += value;
     }
+    out += "]}}";
     out += "]}]}]}";
-    if (!any) out.clear();
     return out;
 }
 
@@ -903,9 +925,7 @@ void mesp_otel_register_web()
 void mesp_otel_init()
 {
     s_mutex = xSemaphoreCreateMutex();
-    s_metrics = (metric_t *)heap_caps_calloc_prefer(MAX_METRICS, sizeof(metric_t), 2, MALLOC_CAP_SPIRAM,
-                                                    MALLOC_CAP_DEFAULT);
-    if (!s_metrics) ESP_LOGE(TAG, "No memory for the metric table");
+    s_metrics = new metric_map_t();
     load_settings();
     // Now, so the logs of the start are kept too.
     apply_log_settings(s_settings);
