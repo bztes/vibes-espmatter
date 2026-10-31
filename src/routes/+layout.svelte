@@ -32,7 +32,7 @@
 	<title>vibes-espmatter</title>
 </svelte:head>
 
-<div class="flex min-h-screen flex-col">
+<div class="grid min-h-screen grid-rows-[auto_1fr_auto]">
 	<header class="sticky top-0 z-20 border-b bg-card">
 		<div class="mx-auto flex h-14 max-w-[1280px] items-center gap-6 px-4">
 			<a href={resolve('/')} class="flex items-center gap-2 font-semibold text-fg no-underline">
@@ -60,7 +60,7 @@
 		</div>
 	</header>
 
-	<main class="flex-1">
+	<main>
 		{@render children()}
 	</main>
 
