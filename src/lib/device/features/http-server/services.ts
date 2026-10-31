@@ -1,23 +1,33 @@
-import { defineFirmwareApi, defineService, Registry, type Services } from '../../services';
+import { defineService, Registry, type Services } from '../../services';
 import type { DeviceApiRoute } from '../../types';
 
-/** The web server (`mesp_web_add()`): for features whose firmware serves something over HTTP. */
-export const webServer = defineFirmwareApi('http_server.webServer', 'http_server');
+/** What a feature serves over the HTTP server (`webServer`). */
+export interface WebContribution {
+	/** Its routes as documented (shown by the configurator's API tab). */
+	api?: DeviceApiRoute[];
+	/**
+	 * Firmware built only with the HTTP server, e.g. `espm_wifi_web.cpp`: the only sources of a
+	 * feature that doesn't require it which may include `espm_web.h`.
+	 */
+	sources?: Record<string, string>;
+	/** Function (`void name()`) adding its routes (`mesp_web_add()`), called once the logins are up. */
+	init?: string;
+}
 
 /**
- * The device's REST API: the features whose firmware adds routes (`mesp_web_add()`) register
- * their docs here (shown by the configurator's API tab). Only on chips with the HTTP server.
+ * The web server (`mesp_web_add()`): the features whose firmware serves something over HTTP
+ * register what (`WebContribution`). Those that only work with it `use` it, the others `find` it,
+ * so their web part is only built with the HTTP server.
  */
-export const deviceApi = defineService(
-	'http_server.deviceApi',
-	() => new Registry<DeviceApiRoute>(),
+export const webServer = defineService(
+	'http_server.webServer',
+	() => new Registry<WebContribution>(),
 	'http_server'
 );
 
 /** The routes a chip's features registered, in hook order, with the feature's name (none without the HTTP server). */
 export function documentedRoutes(services: Services): (DeviceApiRoute & { feature: string })[] {
-	return (services.find(deviceApi)?.entries() ?? []).map(({ feature, item }) => ({
-		...item,
-		feature: feature.name
-	}));
+	return (services.find(webServer)?.entries() ?? []).flatMap(({ feature, item }) =>
+		(item.api ?? []).map((route) => ({ ...route, feature: feature.name }))
+	);
 }

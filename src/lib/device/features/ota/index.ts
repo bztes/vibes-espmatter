@@ -1,7 +1,7 @@
 import { firmware, flashMethods } from '../core/services';
 import type { FeatureDef } from '../../types';
 import { flashMB, OTA_MIN_FLASH_MB } from '../core/index.ts';
-import { deviceApi } from '../http-server/services';
+import { webServer } from '../http-server/services';
 import { devicePanels } from '../web-ui/services';
 import { api } from './api';
 import Flash from './configurator/Flash.svelte';
@@ -26,7 +26,7 @@ export default {
 			: [],
 	activate({ use, find }) {
 		use(flashMethods).register({ id: 'ota', title: 'OTA', component: Flash });
-		use(deviceApi).register(...api);
+		use(webServer).register({ api });
 		use(firmware).register(() => ({
 			defines: { MESP_OTA: true },
 			sources: { 'espm_ota.cpp': otaCpp },

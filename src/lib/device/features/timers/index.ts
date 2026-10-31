@@ -1,6 +1,6 @@
 import { firmware } from '../core/services';
 import type { FeatureDef } from '../../types';
-import { deviceApi } from '../http-server/services';
+import { webServer } from '../http-server/services';
 import { USER_DASHBOARD } from '../user-dashboard/index.ts';
 import { devicePanels } from '../web-ui/services';
 import { api } from './api';
@@ -25,7 +25,7 @@ export default {
 		// The lights are the Matter controller's, the clock is NTP's.
 		use(matterController);
 		use(clock);
-		use(deviceApi).register(...api);
+		use(webServer).register({ api });
 		use(firmware).register(() => ({
 			sources: { 'espm_timers.cpp': timersCpp },
 			hooks: {

@@ -412,22 +412,58 @@ export function validateProject(project: ProjectConfig): Issue[] {
 
 /**
  * The chip's services, with what its features registered: each feature activated in hook order
- * (`FeatureDef.activate`).
+ * (`FeatureDef.activate`). `reached`: told each feature of the chip one `use`s, `find`s or `has`.
  */
-function activateChip(project: ProjectConfig, chip: ChipConfig): Services {
+function activateChip(
+	project: ProjectConfig,
+	chip: ChipConfig,
+	reached?: (feature: FeatureDef, other: string) => void
+): Services {
 	const enabled = chipFeatures(chip);
-	const services = new Services(enabled.map((f) => f.id));
+	const ids = new Set(enabled.map((f) => f.id));
+	const services = new Services(ids);
 	for (const feature of enabled) {
+		const reach = (other?: string) => {
+			if (reached && other && other !== feature.id && ids.has(other)) reached(feature, other);
+		};
+		const context = makeContext(project, chip, feature, () => services);
 		feature.activate?.({
-			...makeContext(project, chip, feature, () => services),
-			use: (key) => scoped(services.get(key), feature),
+			...context,
+			use: (key) => {
+				reach(key.feature);
+				return scoped(services.get(key), feature);
+			},
 			find: (key) => {
+				reach(key.feature);
 				const service = services.find(key);
 				return service === undefined ? undefined : scoped(service, feature);
+			},
+			has: (id, roleId = chip.id) => {
+				if (roleId === chip.id) reach(id);
+				return context.has(id, roleId);
 			}
 		});
 	}
 	return services;
+}
+
+/**
+ * Per chip id: the features of the chip each one works with when they are there, without
+ * requiring them (`requiredFeatures`): what its `activate` `find`s, checks with `has` or `use`s
+ * only then.
+ */
+export function softDependencies(project: ProjectConfig): Map<string, Map<string, Set<string>>> {
+	project = normalizeProject(project);
+	const result = new Map<string, Map<string, Set<string>>>();
+	for (const chip of project.chips) {
+		const soft = new Map<string, Set<string>>();
+		activateChip(project, chip, (feature, other) => {
+			if (requiredFeatures(feature).includes(other)) return;
+			soft.set(feature.id, (soft.get(feature.id) ?? new Set()).add(other));
+		});
+		result.set(chip.id, soft);
+	}
+	return result;
 }
 
 /** The services of a chip of the device, with what its features registered. */
@@ -458,7 +494,7 @@ function chipPages(services: Services): (DevicePage & { dir: string })[] {
 		.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
-/** The REST API routes a chip's features registered (`deviceApi`), in hook order, with the feature's name. */
+/** The REST API routes a chip's features registered (`webServer`), in hook order, with the feature's name. */
 export function apiRoutes(
 	project: ProjectConfig,
 	chipId: string
@@ -700,14 +736,11 @@ export function generateRole(project: ProjectConfig, roleId: string): GeneratedP
 			MESP_ROLE: role.id,
 			MESP_BUILD_ID: buildId,
 			MESP_HOSTNAME: slugify(project.name),
-			MESP_WEB: false,
 			MESP_WEB_PORT: 80,
 			MESP_WEB_AUTH_USER: '',
 			MESP_WEB_AUTH_PASSWORD: '',
 			MESP_WEB_AUTH_SEED: 0,
-			MESP_THREAD: false,
-			MESP_OTA: false,
-			MESP_OTEL: false
+			MESP_OTA: false
 		},
 		compileOptions: [],
 		linkOptions: [],

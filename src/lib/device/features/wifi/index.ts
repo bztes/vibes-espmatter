@@ -1,12 +1,13 @@
 import { configuratorEditors, firmware } from '../core/services';
 import type { FeatureDef, FeatureIssue, Validate } from '../../types';
 import { slugify } from '../../util';
-import { deviceApi } from '../http-server/services';
+import { webServer } from '../http-server/services';
 import { devicePanels } from '../web-ui/services';
 import { api } from './api';
 import Editor from './configurator/Editor.svelte';
 import wifiCpp from './firmware/espm_wifi.cpp?raw';
 import wifiH from './firmware/espm_wifi.h?raw';
+import wifiWebCpp from './firmware/espm_wifi_web.cpp?raw';
 
 /** Letters, digits and dashes, not at the start or end. */
 const HOSTNAME = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
@@ -49,7 +50,7 @@ export default {
 	chips: ['esp32', 'esp32s3', 'esp32c3', 'esp32c6'],
 	defaults,
 	validate,
-	activate({ use, find, config, project, has }) {
+	activate({ use, find, config, project }) {
 		use(configuratorEditors).register(Editor);
 		use(firmware).register(() => ({
 			sdkconfig: {
@@ -61,16 +62,20 @@ export default {
 				MESP_WIFI_PASSWORD: String(config.password),
 				MESP_HOSTNAME: String(config.hostname).trim().toLowerCase() || slugify(project.name)
 			},
-			sources: { 'espm_wifi.cpp': wifiCpp, 'espm_wifi.h': wifiH },
+			sources: {
+				'espm_wifi.cpp': wifiCpp,
+				'espm_wifi.h': wifiH
+			},
 			hooks: {
 				includes: ['#include "espm_wifi.h"'],
-				postStart: [
-					'mesp_wifi_connect();',
-					...(has('http_server') ? ['mesp_wifi_register_web();'] : [])
-				]
+				postStart: ['mesp_wifi_connect();']
 			}
 		}));
-		find(deviceApi)?.register(...api);
+		find(webServer)?.register({
+			api,
+			sources: { 'espm_wifi_web.cpp': wifiWebCpp },
+			init: 'mesp_wifi_register_web'
+		});
 		find(devicePanels)?.register(
 			{
 				id: 'wifi',

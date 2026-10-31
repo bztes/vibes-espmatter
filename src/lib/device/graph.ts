@@ -1,4 +1,4 @@
-import { chipFeatures, requiredFeatures } from './generator';
+import { chipFeatures, requiredFeatures, softDependencies } from './generator';
 import type { FeatureDef, ProjectConfig } from './types';
 
 export interface GraphNode {
@@ -14,16 +14,20 @@ export interface GraphEdge {
 	/** The feature that relies on `to`. */
 	from: string;
 	to: string;
-	/** `requires`: on the same board (`requiredFeatures`). `link`: works with a feature of another board. */
-	kind: 'requires' | 'link';
+	/**
+	 * `requires`: on the same board (`requiredFeatures`). `soft`: works with it when it is on the
+	 * same board (`softDependencies`). `link`: works with a feature of another board.
+	 */
+	kind: 'requires' | 'soft' | 'link';
 	label?: string;
 }
 
 const key = (chip: string, feature: string) => `${chip}:${feature}`;
 
 /**
- * What relies on what in a device: `requires` within each board, plus the links between boards
- * (a feature talking to its counterpart over a UART).
+ * What relies on what in a device: `requires` and `soft` within each board, plus the links between
+ * boards (a feature talking to its counterpart over a UART). Only `requires` sets the depth: soft
+ * dependencies can point either way.
  */
 export function dependencyGraph(project: ProjectConfig): {
 	nodes: GraphNode[];
@@ -31,6 +35,7 @@ export function dependencyGraph(project: ProjectConfig): {
 } {
 	const nodes: GraphNode[] = [];
 	const edges: GraphEdge[] = [];
+	const softByChip = softDependencies(project);
 
 	for (const chip of project.chips) {
 		const present = chipFeatures(chip);
@@ -55,7 +60,10 @@ export function dependencyGraph(project: ProjectConfig): {
 			depth.set(f.id, d);
 			return d;
 		};
+		const soft = softByChip.get(chip.id);
 		for (const f of present) {
+			for (const s of soft?.get(f.id) ?? [])
+				edges.push({ from: key(chip.id, f.id), to: key(chip.id, s), kind: 'soft' });
 			nodes.push({ key: key(chip.id, f.id), chip: chip.id, feature: f, depth: depthOf(f) });
 			for (const r of requiredFeatures(f)) {
 				if (ids.has(r))

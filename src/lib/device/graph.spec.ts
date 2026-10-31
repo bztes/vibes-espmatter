@@ -17,6 +17,11 @@ describe('dependency graph', () => {
 		// timers and automations only bring panels to the dashboards: they don't need them
 		expect(has('host:timers', 'host:user_dashboard', 'requires')).toBe(false);
 		expect(has('host:automations', 'host:admin_dashboard', 'requires')).toBe(false);
+		// … but work with them when they are there
+		expect(has('host:timers', 'host:user_dashboard', 'soft')).toBe(true);
+		expect(has('host:automations', 'host:admin_dashboard', 'soft')).toBe(true);
+		// a requirement is not also a soft dependency
+		expect(has('host:ota', 'host:http_server', 'soft')).toBe(false);
 
 		expect(has('host:ota', 'host:http_server', 'requires')).toBe(true);
 		// between boards: the border router talks to the radio

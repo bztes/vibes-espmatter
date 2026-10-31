@@ -22,6 +22,7 @@ export default {
 				wifi: {},
 				thread_br: {},
 				matter_controller: {},
+				matter_controller_thread: {},
 				http_server: {},
 				web_ui: {},
 				ota: {},

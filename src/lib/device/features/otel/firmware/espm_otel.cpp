@@ -5,7 +5,8 @@
 //
 // Endpoint, Authorization header, interval and device metrics come from the build
 // (MESP_OTEL_*) and can be changed in the admin dashboard (/api/otel, stored in NVS). A firmware
-// built with other values than the last one overrides the device's settings, like Wi-Fi does.
+// built with other values than the last one overrides the device's settings, like Wi-Fi does. The
+// routes are in espm_otel_web.cpp.
 //
 // Timestamps need the wall clock, so nothing is recorded before SNTP synced (espm_ntp.cpp). Each
 // push is a snapshot with its own timestamps. While the endpoint (or Wi-Fi) is down, snapshots are
@@ -24,7 +25,6 @@
 #include "espm_otel.h"
 
 #include <cmath>
-#include <cctype>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -44,10 +44,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
-
-#if MESP_WEB
-#include "espm_web.h"
-#endif
 
 static const char *TAG = "mesp_otel";
 
@@ -95,30 +91,6 @@ struct metric_t {
     int64_t start_us;
 };
 
-/** Runtime settings, stored in NVS as a blob – only append fields. */
-struct settings_t {
-    bool enabled;
-    bool system;
-    uint32_t interval_s;
-    char endpoint[201];
-    char auth[257];
-    bool logs;
-    /** Lowest level of the logs sent: 'E', 'W' or 'I'. */
-    char log_level;
-    bool metrics;
-    uint32_t log_interval_s;
-};
-
-/** What the admin dashboard shows. */
-struct status_t {
-    const char *state; // "off", "clock" (waiting for the time), "wifi" (for Wi-Fi), "ok", "error"
-    char error[64];
-    time_t last_ok;
-    char logs_error[64];
-    time_t logs_last_ok;
-    /** Wi-Fi is connected (as the push task saw it last). */
-    bool online;
-};
 
 /** Allocates in PSRAM if the board has it: map entries are small, malloc would keep them internal. */
 template <class T> struct prefer_psram {
@@ -140,8 +112,8 @@ template <class T> struct prefer_psram {
 using metric_map_t =
     std::map<metric_key_t, metric_t, std::less<metric_key_t>, prefer_psram<std::pair<const metric_key_t, metric_t>>>;
 static metric_map_t *s_metrics;
-static settings_t s_settings;
-static status_t s_status = {"clock", "", 0, "", 0};
+static mesp_otel_settings_t s_settings;
+static mesp_otel_status_t s_status = {"clock", "", 0, "", 0};
 /** Guards the metric table, the settings and the status. */
 static SemaphoreHandle_t s_mutex;
 static TaskHandle_t s_task;
@@ -275,7 +247,7 @@ static int log_hook(const char *fmt, va_list args)
 }
 
 /** Switch capturing on or off; the hook stays installed once it is. */
-static void apply_log_settings(const settings_t &cfg)
+static void apply_log_settings(const mesp_otel_settings_t &cfg)
 {
     const bool on = cfg.enabled && cfg.logs && level_rank(cfg.log_level);
     if (on && !s_logs) {
@@ -502,9 +474,9 @@ static std::string build_logs_request(const log_entry_t *lines, size_t n)
 enum push_result_t { PUSH_OK, PUSH_RETRY, PUSH_REJECTED };
 
 /** The push task's copy of the settings, taken at the start of each round. */
-static settings_t s_cfg;
+static mesp_otel_settings_t s_cfg;
 /** Room for the endpoint and the path added to it. */
-#define URL_MAX (sizeof(settings_t::endpoint) + 12)
+#define URL_MAX (sizeof(mesp_otel_settings_t::endpoint) + 12)
 /** Where the metrics go: the endpoint with /v1/metrics. */
 static char s_metrics_url[URL_MAX];
 
@@ -734,8 +706,6 @@ static void push_task(void *)
 // Settings
 // ---------------------------------------------------------------------------------------------
 
-#define MIN_INTERVAL_S 10
-#define MAX_INTERVAL_S 3600
 
 /** FNV-1a of the build's settings: tells whether a newly flashed firmware brings other ones. */
 static uint32_t build_settings_hash()
@@ -753,7 +723,7 @@ static uint32_t build_settings_hash()
 /** The device's settings, or the build's when it brings other ones than last time. */
 static void load_settings()
 {
-    settings_t build = {};
+    mesp_otel_settings_t build = {};
     build.enabled = MESP_OTEL_ENDPOINT[0] != 0;
     build.system = MESP_OTEL_SYSTEM;
     build.interval_s = MESP_OTEL_INTERVAL_S;
@@ -769,15 +739,15 @@ static void load_settings()
     if (nvs_open("mesp_otel", NVS_READWRITE, &h) != ESP_OK) return;
     uint32_t applied = 0;
     const uint32_t hash = build_settings_hash();
-    settings_t stored = {};
+    mesp_otel_settings_t stored = {};
     size_t len = sizeof(stored);
     if (nvs_get_u32(h, "build", &applied) == ESP_OK && applied == hash &&
         nvs_get_blob(h, "settings", &stored, &len) == ESP_OK && len == sizeof(stored)) {
         stored.endpoint[sizeof(stored.endpoint) - 1] = 0;
         stored.auth[sizeof(stored.auth) - 1] = 0;
-        if (stored.interval_s < MIN_INTERVAL_S || stored.interval_s > MAX_INTERVAL_S) stored.interval_s = build.interval_s;
+        if (stored.interval_s < MESP_OTEL_MIN_INTERVAL_S || stored.interval_s > MESP_OTEL_MAX_INTERVAL_S) stored.interval_s = build.interval_s;
         if (level_rank(stored.log_level) < 1 || level_rank(stored.log_level) > 3) stored.log_level = build.log_level;
-        if (stored.log_interval_s > MAX_INTERVAL_S) stored.log_interval_s = build.log_interval_s;
+        if (stored.log_interval_s > MESP_OTEL_MAX_INTERVAL_S) stored.log_interval_s = build.log_interval_s;
         s_settings = stored;
     } else {
         ESP_LOGI(TAG, "Using the OpenTelemetry settings of this firmware");
@@ -788,7 +758,7 @@ static void load_settings()
     nvs_close(h);
 }
 
-static bool save_settings(const settings_t &next)
+static bool save_settings(const mesp_otel_settings_t &next)
 {
     nvs_handle_t h;
     if (nvs_open("mesp_otel", NVS_READWRITE, &h) != ESP_OK) return false;
@@ -797,108 +767,29 @@ static bool save_settings(const settings_t &next)
     return ok;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Admin dashboard: GET/POST /api/otel
-// ---------------------------------------------------------------------------------------------
-
-#if MESP_WEB
-static const char *level_name(char level)
+mesp_otel_settings_t mesp_otel_settings()
 {
-    return level == 'E' ? "error" : level == 'I' ? "info" : "warn";
+    Lock lock;
+    return s_settings;
 }
 
-/** Settings (without the Authorization header itself) and how sending goes. */
-static esp_err_t send_settings(httpd_req_t *req)
+mesp_otel_status_t mesp_otel_status(uint32_t &logs_waiting, uint32_t &logs_dropped)
 {
-    settings_t cfg;
-    status_t st;
+    mesp_otel_status_t status;
     {
         Lock lock;
-        cfg = s_settings;
-        st = s_status;
+        status = s_status;
     }
-    Json j;
-    j.obj().key("enabled").boolean(cfg.enabled).key("endpoint").str(cfg.endpoint);
-    j.key("authSet").boolean(cfg.auth[0] != 0).key("interval").num(cfg.interval_s);
-    j.key("system").boolean(cfg.system);
-    j.key("metrics").boolean(cfg.metrics).key("logs").boolean(cfg.logs);
-    j.key("logLevel").str(level_name(cfg.log_level)).key("logInterval").num(cfg.log_interval_s);
-    j.key("status").obj().key("state").str(st.state).key("error").str(st.error).key("online").boolean(st.online);
-    j.key("lastOk").num((long long)st.last_ok);
-    uint32_t log_waiting, log_dropped;
     portENTER_CRITICAL(&s_log_mux);
-    log_waiting = s_log_write - s_log_read;
-    log_dropped = s_logs_dropped;
+    logs_waiting = s_log_write - s_log_read;
+    logs_dropped = s_logs_dropped;
     portEXIT_CRITICAL(&s_log_mux);
-    j.key("logsError").str(st.logs_error).key("logsLastOk").num((long long)st.logs_last_ok);
-    j.key("logsWaiting").num(log_waiting).key("logsDropped").num(log_dropped).end_obj();
-    j.end_obj();
-    return mesp_web_send_json(req, j.out());
+    return status;
 }
 
-static esp_err_t otel_get(httpd_req_t *req)
+bool mesp_otel_set(const mesp_otel_settings_t &next)
 {
-    if (!mesp_web_require(req, MESP_ROLE_ADMIN)) return ESP_OK;
-    return send_settings(req);
-}
-
-/** Empty, or an http(s) URL that fits. */
-static bool valid_url(const std::string &v, size_t size)
-{
-    const bool http = v.rfind("http://", 0) == 0 || v.rfind("https://", 0) == 0;
-    return v.empty() || (http && v.size() < size && v.find_first_of(" \t\r\n") == std::string::npos);
-}
-
-static bool is_true(const std::string &v)
-{
-    return v == "true" || v == "1" || v == "on";
-}
-
-/** Change settings; fields that aren't sent stay. `auth` replaces the header (empty: none). */
-static esp_err_t otel_post(httpd_req_t *req)
-{
-    if (!mesp_web_require(req, MESP_ROLE_ADMIN)) return ESP_OK;
-    std::string body, v;
-    if (!mesp_web_read_body(req, body)) return ESP_OK;
-    settings_t next;
-    {
-        Lock lock;
-        next = s_settings;
-    }
-    if (mesp_web_param(body, "endpoint", v)) {
-        if (!valid_url(v, sizeof(next.endpoint)))
-            return mesp_web_send_error(req, "400 Bad Request", "the endpoint must be an http:// or https:// URL");
-        strlcpy(next.endpoint, v.c_str(), sizeof(next.endpoint));
-    }
-    if (mesp_web_param(body, "auth", v)) {
-        if (v.size() >= sizeof(next.auth) || v.find_first_of("\r\n") != std::string::npos)
-            return mesp_web_send_error(req, "400 Bad Request", "invalid Authorization header");
-        strlcpy(next.auth, v.c_str(), sizeof(next.auth));
-    }
-    if (mesp_web_param(body, "interval", v)) {
-        const long secs = strtol(v.c_str(), nullptr, 10);
-        if (secs < MIN_INTERVAL_S || secs > MAX_INTERVAL_S)
-            return mesp_web_send_error(req, "400 Bad Request", "the interval must be 10 to 3600 seconds");
-        next.interval_s = secs;
-    }
-    if (mesp_web_param(body, "logInterval", v)) {
-        const long secs = strtol(v.c_str(), nullptr, 10);
-        if (secs < 0 || secs > MAX_INTERVAL_S)
-            return mesp_web_send_error(req, "400 Bad Request", "the log interval must be 0 (right away) to 3600 seconds");
-        next.log_interval_s = secs;
-    }
-    if (mesp_web_param(body, "metrics", v)) next.metrics = is_true(v);
-    if (mesp_web_param(body, "system", v)) next.system = is_true(v);
-    if (mesp_web_param(body, "enabled", v)) next.enabled = is_true(v);
-    if (mesp_web_param(body, "logs", v)) next.logs = is_true(v);
-    if (mesp_web_param(body, "logLevel", v)) {
-        if (v != "error" && v != "warn" && v != "info")
-            return mesp_web_send_error(req, "400 Bad Request", "the log level must be error, warn or info");
-        next.log_level = (char)toupper(v[0]);
-    }
-    if (next.enabled && !next.endpoint[0])
-        return mesp_web_send_error(req, "400 Bad Request", "set the endpoint first");
-    if (!save_settings(next)) return mesp_web_send_error(req, "500 Internal Server Error", "couldn't save the settings");
+    if (!save_settings(next)) return false;
     {
         Lock lock;
         s_settings = next;
@@ -908,15 +799,8 @@ static esp_err_t otel_post(httpd_req_t *req)
     ESP_LOGI(TAG, "Settings changed: %s, metrics %s, logs %s", next.enabled ? next.endpoint : "off",
              next.metrics ? "on" : "off", next.logs ? "on" : "off");
     if (s_task) xTaskNotify(s_task, WAKE_SETTINGS, eSetBits); // send right away
-    return send_settings(req);
+    return true;
 }
-
-void mesp_otel_register_web()
-{
-    mesp_web_add("/api/otel", HTTP_GET, otel_get);
-    mesp_web_add("/api/otel", HTTP_POST, otel_post);
-}
-#endif
 
 // ---------------------------------------------------------------------------------------------
 // Public API

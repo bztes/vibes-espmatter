@@ -20,7 +20,7 @@ export interface ConfiguratorTabProps {
 	chip: ChipConfig;
 	/** Its settings (defaults applied). */
 	config: FeatureConfig;
-	/** The chip's services, e.g. the HTTP server's `deviceApi`. */
+	/** The chip's services, e.g. the HTTP server's `webServer`. */
 	services: Services;
 	/** Last known address of the device's web interface, e.g. `http://hub.local`. */
 	address?: string | null;

@@ -22,7 +22,7 @@ const settings = {
 	}
 };
 
-/** Route of `espm_otel.cpp`, registered only with the admin dashboard (`mesp_otel_register_web()`). */
+/** Route of `espm_otel_web.cpp`, registered only with the admin dashboard (`mesp_otel_register_web()`). */
 export const api: DeviceApiRoute[] = [
 	{
 		method: 'GET',

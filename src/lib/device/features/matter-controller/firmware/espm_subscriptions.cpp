@@ -78,7 +78,7 @@ static uint8_t wanted(uint32_t type)
 /**
  * One subscription per node with switches (button events), sensors (temperature, humidity for
  * the dashboard) or lights and plugs (on/off, brightness, color temperature, power and energy, e.g.
- * for OpenTelemetry). Switches and sensors are mostly battery-powered and sleepy: they report, we
+ * for mesp_matter_on_values). Switches and sensors are mostly battery-powered and sleepy: they report, we
  * don't poll them.
  */
 enum : uint8_t { SUB_PENDING, SUB_ACTIVE, SUB_RETRY };

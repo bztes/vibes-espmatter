@@ -141,7 +141,7 @@ export interface DevicePage {
 
 /**
  * A route of the device's REST API (`mesp_web_add()`), as the feature that adds it documents it
- * (registered with the HTTP server's `deviceApi`). Shown by the HTTP server's API tab of the configurator.
+ * (registered with the HTTP server's `webServer`). Shown by the HTTP server's API tab of the configurator.
  */
 export interface DeviceApiRoute {
 	method: 'GET' | 'POST';
@@ -334,7 +334,7 @@ export interface FeatureDef<C extends FeatureConfig = FeatureConfig> {
 	validate?(ctx: GenerateContext<C>): FeatureIssue[];
 	/**
 	 * Runs for each chip with the feature, in hook order: registers what it brings with the chip's
-	 * services (`ctx.use(firmware)`, `ctx.use(configuratorEditors)`, `ctx.find(deviceApi)` …). The
+	 * services (`ctx.use(firmware)`, `ctx.use(configuratorEditors)`, `ctx.find(webServer)` …). The
 	 * features bringing what it `use`s are its requirements: added with it (`requiredFeatures`). Also runs
 	 * while the settings are invalid: anything that needs valid ones goes into the registered
 	 * firmware, which is only called when the project is generated.

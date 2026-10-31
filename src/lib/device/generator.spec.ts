@@ -173,6 +173,22 @@ describe('generator', () => {
 		expect(gen.files['main/app_main.cpp']).toContain('mesp_matter_register_web();');
 	});
 
+	it('builds the controller without the HTTP server', () => {
+		const project = defaultProject(undefined, 'Headless');
+		const main = project.chips[0];
+		addFeature(main, 'matter_controller');
+		main.features.wifi.ssid = 'MyWifi';
+		expect(main.features).not.toHaveProperty('http_server');
+		expect(validateProject(project)).toEqual([]);
+		const [gen] = generateProject(project);
+		expect(gen.files).toHaveProperty('main/espm_matter.cpp');
+		expect(gen.files).not.toHaveProperty('main/espm_matter_web.cpp');
+		expect(gen.files).not.toHaveProperty('main/espm_matter_access.cpp');
+		expect(gen.files).not.toHaveProperty('main/espm_wifi_web.cpp');
+		expect(gen.files['main/app_main.cpp']).not.toContain('mesp_web');
+		expect(gen.notes.join('\n')).toContain('can’t pair new devices');
+	});
+
 	it('runs timers, scenes and automations without the dashboards, through the API', () => {
 		const project = defaultProject(undefined, 'Plain');
 		const main = project.chips[0];
@@ -453,20 +469,19 @@ describe('panasonic heat pump', () => {
 describe('opentelemetry metrics', () => {
 	function metricsProject() {
 		const project = heatPumpProject();
-		addFeature(chip(project, 'main'), 'otel_metrics');
-		chip(project, 'main').features.otel_metrics.endpoint =
-			'https://o2.example.com/api/default/v1/metrics';
-		chip(project, 'main').features.otel_metrics.authorization = 'Basic dXNlcjpwdw==';
+		addFeature(chip(project, 'main'), 'otel');
+		chip(project, 'main').features.otel.endpoint = 'https://o2.example.com/api/default/v1/metrics';
+		chip(project, 'main').features.otel.authorization = 'Basic dXNlcjpwdw==';
 		return project;
 	}
 
 	it('needs an http(s) endpoint', () => {
 		const project = metricsProject();
 		expect(validateProject(project)).toEqual([]);
-		chip(project, 'main').features.otel_metrics.endpoint = 'o2.example.com';
+		chip(project, 'main').features.otel.endpoint = 'o2.example.com';
 		expect(validateProject(project).map((i) => i.field)).toContain('endpoint');
 		// no admin dashboard on the heat pump to set it on the device
-		chip(project, 'main').features.otel_metrics.endpoint = '';
+		chip(project, 'main').features.otel.endpoint = '';
 		expect(validateProject(project).map((i) => i.message)).toContain(
 			'OpenTelemetry needs an OTLP endpoint (or the admin dashboard to set it on the device).'
 		);
@@ -476,7 +491,6 @@ describe('opentelemetry metrics', () => {
 		const [main] = generateProject(metricsProject());
 		const config = main.files['main/espm_config.h'];
 		const app = main.files['main/app_main.cpp'];
-		expect(config).toContain('#define MESP_OTEL 1');
 		expect(config).toContain(
 			'#define MESP_OTEL_ENDPOINT "https://o2.example.com/api/default/v1/metrics"'
 		);
@@ -499,8 +513,8 @@ describe('opentelemetry metrics', () => {
 		const project = metricsProject();
 		let config = generateProject(project)[0].files['main/espm_config.h'];
 		expect(config).toContain('#define MESP_OTEL_LOGS 0');
-		chip(project, 'main').features.otel_metrics.logs = true;
-		chip(project, 'main').features.otel_metrics.logLevel = 'info';
+		chip(project, 'main').features.otel.logs = true;
+		chip(project, 'main').features.otel.logLevel = 'info';
 		expect(validateProject(project)).toEqual([]);
 		config = generateProject(project)[0].files['main/espm_config.h'];
 		expect(config).toContain('#define MESP_OTEL_LOGS 1');
@@ -508,18 +522,18 @@ describe('opentelemetry metrics', () => {
 		expect(config).toContain('#define MESP_OTEL_LOG_INTERVAL_S 0');
 		expect(config).toContain('#define MESP_OTEL_METRICS 1');
 		// logs only
-		chip(project, 'main').features.otel_metrics.metrics = false;
+		chip(project, 'main').features.otel.metrics = false;
 		expect(validateProject(project)).toEqual([]);
 		expect(generateProject(project)[0].files['main/espm_config.h']).toContain(
 			'#define MESP_OTEL_METRICS 0'
 		);
-		chip(project, 'main').features.otel_metrics.logs = false;
+		chip(project, 'main').features.otel.logs = false;
 		expect(validateProject(project).map((i) => i.message)).toContain(
 			'OpenTelemetry: switch on metrics, logs or both.'
 		);
-		chip(project, 'main').features.otel_metrics.logs = true;
+		chip(project, 'main').features.otel.logs = true;
 		// one base URL: the firmware adds /v1/metrics and /v1/logs
-		chip(project, 'main').features.otel_metrics.endpoint = 'http://o2.local:4318';
+		chip(project, 'main').features.otel.endpoint = 'http://o2.local:4318';
 		expect(validateProject(project)).toEqual([]);
 	});
 
@@ -528,7 +542,7 @@ describe('opentelemetry metrics', () => {
 		const project = metricsProject();
 		const built = projectHash(normalizeProject(structuredClone(project)));
 		expect(projectHash(normalizeProject(normalizeProject(project)))).toBe(built);
-		chip(project, 'main').features.otel_metrics.logs = true;
+		chip(project, 'main').features.otel.logs = true;
 		expect(projectHash(normalizeProject(project))).not.toBe(built);
 	});
 
@@ -548,15 +562,13 @@ describe('opentelemetry metrics', () => {
 
 	it('is off unless added', () => {
 		const [main] = generateProject(heatPumpProject());
-		expect(main.files['main/espm_config.h']).toContain('#define MESP_OTEL 0');
 		expect(main.files['main/CMakeLists.txt']).not.toContain('espm_otel.cpp');
 	});
 
 	it('shares the time server with the timers', () => {
 		const project = hubProject();
-		addFeature(chip(project, 'host'), 'otel_metrics');
-		chip(project, 'host').features.otel_metrics.endpoint =
-			'http://o2.local:5080/api/default/v1/metrics';
+		addFeature(chip(project, 'host'), 'otel');
+		chip(project, 'host').features.otel.endpoint = 'http://o2.local:5080/api/default/v1/metrics';
 		chip(project, 'host').features.ntp.server = 'fritz.box';
 		expect(validateProject(project)).toEqual([]);
 		const host = generateProject(project)[1];
@@ -569,9 +581,31 @@ describe('opentelemetry metrics', () => {
 		expect(host.ui.find((u) => u.page === 'admin')!.panels.map((p) => p.id)).toContain('otel');
 	});
 
+	it('sends the Matter devices’ values with OpenTelemetry metrics', () => {
+		const project = hubProject();
+		const host = chip(project, 'host');
+		addFeature(host, 'otel');
+		let gen = generateProject(project)[1];
+		expect(gen.files).not.toHaveProperty('main/espm_otel_metrics.cpp');
+		expect(gen.files['main/espm_matter.cpp']).not.toMatch(/otel/i);
+
+		addFeature(host, 'otel_metrics');
+		gen = generateProject(project)[1];
+		expect(gen.files['main/CMakeLists.txt']).toContain('"espm_otel_metrics.cpp"');
+		expect(gen.files['main/app_main.cpp']).toContain('mesp_otel_metrics_init();');
+	});
+
+	it('adds OpenTelemetry and the Matter controller with OpenTelemetry metrics', () => {
+		const plain = defaultProject(undefined, 'Plain');
+		addFeature(plain.chips[0], 'otel_metrics');
+		expect(Object.keys(plain.chips[0].features)).toEqual(
+			expect.arrayContaining(['otel', 'matter_controller'])
+		);
+	});
+
 	it('can get its endpoint on the device', () => {
 		const project = hubProject();
-		addFeature(chip(project, 'host'), 'otel_metrics');
+		addFeature(chip(project, 'host'), 'otel');
 		expect(validateProject(project)).toEqual([]);
 		const host = generateProject(project)[1];
 		expect(host.files['main/espm_config.h']).toContain('#define MESP_OTEL_ENDPOINT ""');
@@ -679,9 +713,9 @@ describe('REST API docs', () => {
 	it('documents exactly the routes the firmware registers', () => {
 		const project = hubProject();
 		const host = chip(project, 'host');
-		for (const id of ['ota', 'timers', 'automations', 'otel_metrics'])
+		for (const id of ['ota', 'timers', 'automations', 'otel'])
 			if (!canAddFeature(host, features.get(id), project)) addFeature(host, id);
-		expect(Object.keys(host.features)).toContain('otel_metrics');
+		expect(Object.keys(host.features)).toContain('otel');
 		expect(documented(project, 'host').length).toBeGreaterThan(20);
 		expect(documented(project, 'host')).toEqual(registered(project, 'host'));
 	});

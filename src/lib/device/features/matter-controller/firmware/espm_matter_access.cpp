@@ -4,8 +4,7 @@
 // the access rule of the Matter controller's API (mesp_matter_set_access), which the user
 // dashboard's tiles and features like timers go through. Admins see everything anyway.
 #include "espm_config.h"
-#include "espm_matter.h"
-#include "espm_web.h"
+#include "espm_matter_web.h"
 
 #include <cstring>
 #include <esp_log.h>

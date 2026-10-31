@@ -1,6 +1,6 @@
 <!--
 	The REST API docs of a chip, the configurator's API tab: the routes its features registered
-	(`deviceApi`) as currently configured, with curl examples for the device's address and an OpenAPI
+	(`webServer`) as currently configured, with curl examples for the device's address and an OpenAPI
 	download.
 -->
 <script lang="ts">

@@ -1,11 +1,12 @@
 import { configuratorEditors, firmware } from '../core/services';
 import type { Contribution, FeatureDef, FeatureIssue, Validate } from '../../types';
-import { deviceApi } from '../http-server/services';
+import { webServer } from '../http-server/services';
 import { devicePanels } from '../web-ui/services';
 import { api } from './api';
 import Editor, { LOG_LEVELS } from './configurator/Editor.svelte';
 import otelCpp from './firmware/espm_otel.cpp?raw';
 import otelH from './firmware/espm_otel.h?raw';
+import otelWebCpp from './firmware/espm_otel_web.cpp?raw';
 import { clock } from '../ntp/services';
 import { network } from '../wifi/services';
 
@@ -51,16 +52,15 @@ const validate: Validate<OtelConfig> = ({ config }) => {
 
 /**
  * OpenTelemetry: the device sends measurements of its features (e.g. the heat pump's
- * temperatures, or the Matter controller's paired devices: temperature, humidity, battery, on/off)
+ * temperatures, or with OpenTelemetry metrics the Matter devices: temperature, humidity, battery, on/off)
  * and optionally its own (uptime, memory, Wi-Fi signal) as OTLP/HTTP JSON to a
  * backend that stores and charts them – OpenObserve, VictoriaMetrics, an OpenTelemetry Collector
- * … Features record values with `mesp_otel_gauge()` / `mesp_otel_counter()` (`espm_otel.h`)
- * when `MESP_OTEL` is set. Optionally the device's log lines go to the same backend as OTLP logs.
+ * … Features that use `otel` record values with `mesp_otel_gauge()` / `mesp_otel_counter()`
+ * (`espm_otel.h`). Optionally the device's log lines go to the same backend as OTLP logs.
  * The endpoint is the OTLP base URL; the firmware adds `/v1/metrics` and `/v1/logs`.
  */
 export default {
-	// Saved projects use this id – keep it.
-	id: 'otel_metrics',
+	id: 'otel',
 	dir: 'otel',
 	name: 'OpenTelemetry',
 	description: 'Sends metrics and logs to OpenObserve, VictoriaMetrics or another OTLP backend.',
@@ -74,7 +74,12 @@ export default {
 		use(clock);
 		use(configuratorEditors).register(Editor);
 		// Its routes are for the admin dashboard's panel.
-		if (has('admin_dashboard')) find(deviceApi)?.register(...api);
+		if (has('admin_dashboard'))
+			find(webServer)?.register({
+				api,
+				sources: { 'espm_otel_web.cpp': otelWebCpp },
+				init: 'mesp_otel_register_web'
+			});
 		find(devicePanels)?.register({
 			id: 'otel',
 			title: 'OpenTelemetry',
@@ -94,7 +99,6 @@ export default {
 					'OpenTelemetry: the endpoint is plain HTTP, so the Authorization header goes over the network unencrypted. Use https:// outside your home network.'
 				);
 			const defines: Contribution['defines'] = {
-				MESP_OTEL: true,
 				MESP_OTEL_ENDPOINT: config.endpoint,
 				MESP_OTEL_AUTH: config.authorization,
 				MESP_OTEL_SERVICE: config.serviceName.trim(),
@@ -110,14 +114,14 @@ export default {
 			return {
 				sdkconfig,
 				defines,
-				sources: { 'espm_otel.cpp': otelCpp, 'espm_otel.h': otelH },
+				sources: {
+					'espm_otel.cpp': otelCpp,
+					'espm_otel.h': otelH
+				},
 				hooks: {
 					includes: ['#include "espm_otel.h"'],
 					preStart: ['mesp_otel_init();'],
-					postStart: [
-						'mesp_otel_start();',
-						...(has('admin_dashboard') ? ['mesp_otel_register_web();'] : [])
-					]
+					postStart: ['mesp_otel_start();']
 				},
 				notes
 			};

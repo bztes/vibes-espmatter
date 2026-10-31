@@ -1,13 +1,16 @@
 import { configuratorEditors, firmware } from '../core/services';
 import type { FeatureDef, FeatureIssue, Validate } from '../../types';
 import { psramMode } from '../core/index.ts';
-import { deviceApi } from '../http-server/services';
+import { webServer } from '../http-server/services';
 import { devicePanels } from '../web-ui/services';
 import { api } from './api';
 import Editor, { ATTESTATION } from './configurator/Editor.svelte';
 import { USER_DASHBOARD } from '../user-dashboard/index.ts';
 import matterCpp from './firmware/espm_matter.cpp?raw';
 import matterH from './firmware/espm_matter.h?raw';
+import matterRegistryH from './firmware/espm_matter_registry.h?raw';
+import matterWebCpp from './firmware/espm_matter_web.cpp?raw';
+import matterWebH from './firmware/espm_matter_web.h?raw';
 import accessCpp from './firmware/espm_matter_access.cpp?raw';
 import subscriptionsCpp from './firmware/espm_subscriptions.cpp?raw';
 import bleFixC from './firmware/espm_ble_fix.c?raw';
@@ -54,9 +57,11 @@ const validate: Validate<MatterControllerConfig> = ({ config }) => {
  * own fabric (over BLE → Thread or Wi-Fi, or on-network), keeps a registry of them and subscribes
  * to what they report (buttons, battery, sensors, on/off).
  *
- * With the HTTP server it adds `/api/matter/…`: list, pair, control and remove devices, their
- * values and button events, and which lights each user may use (`/api/matter/access`, the access
- * rule other features like timers go through). Its panels: the devices on the admin dashboard,
+ * Devices are paired through its `/api/matter/…` on the HTTP server: list, pair, control and
+ * remove devices, their values and button events, and which lights each user may use
+ * (`/api/matter/access`, the access rule other features like timers go through). Without the HTTP
+ * server it keeps the devices paired before, e.g. for automations, but can't pair new ones. Pairing over
+ * Thread needs Matter controller Thread (`matter_controller_thread`). Its panels: the devices on the admin dashboard,
  * light tiles on the user dashboard (with who gets which lights on the admin dashboard).
  */
 export default {
@@ -72,7 +77,6 @@ export default {
 	activate(ctx) {
 		const { use, find, config, has } = ctx;
 		use(network);
-		const web = has('http_server');
 		const dashboard = has('user_dashboard');
 		use(configuratorEditors).register(Editor);
 		use(firmware).register(() => ({
@@ -107,31 +111,36 @@ export default {
 				'espm_matter.cpp': matterCpp,
 				'espm_subscriptions.cpp': subscriptionsCpp,
 				'espm_matter.h': matterH,
+				'espm_matter_registry.h': matterRegistryH,
 				'matter_project_config.h': PROJECT_CONFIG_H,
-				'espm_ble_fix.c': bleFixC,
-				// The access rule keeps the lights per login: only with the HTTP server.
-				...(web ? { 'espm_matter_access.cpp': accessCpp } : {})
+				'espm_ble_fix.c': bleFixC
 			},
 			linkOptions: ['-Wl,--wrap=ble_gattc_exchange_mtu', '-Wl,--wrap=peer_find'],
 			hooks: {
 				includes: ['#include "espm_matter.h"'],
-				preStart: [
-					'mesp_matter_init();',
-					'mesp_matter_subscriptions_init();',
-					...(web ? ['mesp_matter_access_init();'] : [])
-				],
-				postStart: [
-					'mesp_matter_start_controller();',
-					'mesp_matter_subscriptions_start();',
-					...(web ? ['mesp_matter_register_web();', 'mesp_matter_access_register_web();'] : [])
-				]
+				preStart: ['mesp_matter_init();', 'mesp_matter_subscriptions_init();'],
+				postStart: ['mesp_matter_start_controller();', 'mesp_matter_subscriptions_start();']
 			},
-			notes:
-				psramMode(ctx) === 'none'
+			notes: [
+				...(psramMode(ctx) === 'none'
 					? ['No PSRAM selected: a Matter controller with Thread border router may run out of RAM.']
-					: []
+					: []),
+				...(has('http_server')
+					? []
+					: [
+							'Matter controller without the HTTP server: it can’t pair new devices, only use those paired before.'
+						])
+			]
 		}));
-		find(deviceApi)?.register(...api);
+		find(webServer)?.register({
+			api,
+			sources: {
+				'espm_matter_web.cpp': matterWebCpp,
+				'espm_matter_web.h': matterWebH,
+				'espm_matter_access.cpp': accessCpp
+			},
+			init: 'mesp_matter_register_web'
+		});
 		const panels = find(devicePanels);
 		panels?.register({
 			id: 'matter',

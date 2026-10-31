@@ -1,11 +1,12 @@
 import { configuratorEditors, firmware, wires } from '../core/services';
 import type { FeatureDef, BoardDef, FeatureIssue, Validate } from '../../types';
-import { deviceApi } from '../http-server/services';
+import { webServer } from '../http-server/services';
 import { devicePanels } from '../web-ui/services';
 import { api } from './api';
 import Editor from './configurator/Editor.svelte';
 import threadCpp from './firmware/espm_thread.cpp?raw';
 import threadH from './firmware/espm_thread.h?raw';
+import threadWebCpp from './firmware/espm_thread_web.cpp?raw';
 import { network } from '../wifi/services';
 
 export const RCP_BAUD = 460800;
@@ -63,7 +64,7 @@ export default {
 		{ key: 'txGpio', label: 'UART TX (to radio RX)' }
 	],
 	validate,
-	activate({ use, find, role, config, chipsWith, featureConfig, has }) {
+	activate({ use, find, role, config, chipsWith, featureConfig }) {
 		use(network);
 		use(configuratorEditors).register(Editor);
 		const radio = chipsWith('openthread_rcp')[0];
@@ -97,7 +98,6 @@ export default {
 					color: '#ef4444'
 				}
 			);
-		const web = has('http_server');
 		use(firmware).register(() => ({
 			sdkconfig: {
 				CONFIG_OPENTHREAD_ENABLED: true,
@@ -133,7 +133,6 @@ export default {
 			},
 			compileOptions: ['-D_NO_GENERIC_THREAD_NETWORK_COMMISSIONING_DRIVER_'],
 			defines: {
-				MESP_THREAD: true,
 				MESP_THREAD_AUTO_FORM: Boolean(config.autoForm),
 				MESP_THREAD_NETWORK_NAME: String(config.networkName),
 				MESP_THREAD_CHANNEL: Number(config.channel),
@@ -141,15 +140,22 @@ export default {
 				MESP_RCP_HOST_TX_PIN: Number(config.txGpio),
 				MESP_RCP_BAUD: RCP_BAUD
 			},
-			sources: { 'espm_thread.cpp': threadCpp, 'espm_thread.h': threadH },
+			sources: {
+				'espm_thread.cpp': threadCpp,
+				'espm_thread.h': threadH
+			},
 			hooks: {
 				includes: ['#include "espm_thread.h"'],
-				postStart: ['mesp_thread_start();', ...(web ? ['mesp_thread_register_web();'] : [])],
+				postStart: ['mesp_thread_start();'],
 				// Wi-Fi is the backbone link of the border router.
 				onIp: ['mesp_thread_on_ip();']
 			}
 		}));
-		find(deviceApi)?.register(...api);
+		find(webServer)?.register({
+			api,
+			sources: { 'espm_thread_web.cpp': threadWebCpp },
+			init: 'mesp_thread_register_web'
+		});
 		find(devicePanels)?.register({
 			id: 'thread',
 			title: 'Thread network',

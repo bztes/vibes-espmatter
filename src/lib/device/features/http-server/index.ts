@@ -8,7 +8,7 @@ import authCpp from './firmware/espm_auth.cpp?raw';
 import webCpp from './firmware/espm_web.cpp?raw';
 import webH from './firmware/espm_web.h?raw';
 import systemCpp from './firmware/espm_system.cpp?raw';
-import { deviceApi } from './services';
+import { webServer } from './services';
 import ApiTab from './configurator/ApiTab.svelte';
 
 const defaults = () => ({ username: 'admin', password: '', port: 80 });
@@ -42,9 +42,10 @@ const validate: Validate<HttpServerConfig> = ({ config }) => {
  * The device's REST API, bare: the logins (admins and users with passwords, stored on the device;
  * the configuration only sets the first admin's initial password), users, status and reboot.
  * Every route needs a login. Other features extend it with their routes (`mesp_web_add()`, e.g.
- * `/api/ota`, `/api/matter/…`, `/api/timers`), document them with its `deviceApi` service (shown in
- * the configurator's API tab) and bring the panels that use them; pages (`mesp_web_add_page()`)
- * come from the web interface. Its own panels (users, system) are on the admin dashboard.
+ * `/api/ota`, `/api/matter/…`, `/api/timers`) through its `webServer` service – their docs (shown in
+ * the configurator's API tab) and, for features that also work without it, the firmware that adds
+ * them – and bring the panels that use them; pages (`mesp_web_add_page()`) come from the web
+ * interface. Its own panels (users, system) are on the admin dashboard.
  */
 export default {
 	id: 'http_server',
@@ -58,35 +59,47 @@ export default {
 	activate({ use, find, config }) {
 		use(configuratorEditors).register(Editor);
 		use(configuratorTabs).register({ id: 'api', title: 'API', component: ApiTab });
-		use(deviceApi).register(...api);
-		use(firmware).register(() => ({
-			sdkconfig: { CONFIG_HTTPD_MAX_REQ_HDR_LEN: 1024 },
-			defines: {
-				MESP_WEB: true,
-				MESP_WEB_PORT: Number(config.port),
-				MESP_WEB_AUTH_USER: String(config.username),
-				MESP_WEB_AUTH_PASSWORD: String(config.password),
-				// Changes when the initial login does: the device then resets that admin to it.
-				MESP_WEB_AUTH_SEED: fnv1a(`${config.username}:${config.password}`)
-			},
-			sources: {
-				'espm_web.cpp': webCpp,
-				'espm_web.h': webH,
-				'espm_system.cpp': systemCpp,
-				'espm_auth.cpp': authCpp
-			},
-			hooks: {
-				includes: ['#include "espm_web.h"'],
-				globals: ['void mesp_system_register_web();'],
-				postStart: [
-					'mesp_auth_init();',
-					'mesp_auth_register_routes();',
-					'mesp_system_register_web();'
-				],
-				// The other features add their routes in `postStart`.
-				started: ['mesp_web_start();']
-			}
-		}));
+		const web = use(webServer);
+		web.register({ api });
+		use(firmware).register(() => {
+			// The web parts of the other features, in hook order.
+			const parts = web.entries().filter(({ item }) => item.sources || item.init);
+			const inits = parts.flatMap(({ feature, item }) =>
+				item.init ? [{ name: item.init, feature: feature.name }] : []
+			);
+			return {
+				sdkconfig: { CONFIG_HTTPD_MAX_REQ_HDR_LEN: 1024 },
+				defines: {
+					MESP_WEB_PORT: Number(config.port),
+					MESP_WEB_AUTH_USER: String(config.username),
+					MESP_WEB_AUTH_PASSWORD: String(config.password),
+					// Changes when the initial login does: the device then resets that admin to it.
+					MESP_WEB_AUTH_SEED: fnv1a(`${config.username}:${config.password}`)
+				},
+				sources: {
+					'espm_web.cpp': webCpp,
+					'espm_web.h': webH,
+					'espm_system.cpp': systemCpp,
+					'espm_auth.cpp': authCpp,
+					...Object.assign({}, ...parts.map(({ item }) => item.sources))
+				},
+				hooks: {
+					includes: ['#include "espm_web.h"'],
+					globals: [
+						'void mesp_system_register_web();',
+						...inits.map(({ name }) => `void ${name}();`)
+					],
+					postStart: [
+						'mesp_auth_init();',
+						'mesp_auth_register_routes();',
+						'mesp_system_register_web();',
+						...inits.map(({ name, feature }) => `${name}(); // ${feature}`)
+					],
+					// The features that require it add their routes in `postStart`.
+					started: ['mesp_web_start();']
+				}
+			};
+		});
 		find(devicePanels)?.register(
 			{
 				id: 'system',

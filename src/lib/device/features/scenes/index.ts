@@ -1,6 +1,6 @@
 import { firmware } from '../core/services';
 import type { FeatureDef } from '../../types';
-import { deviceApi } from '../http-server/services';
+import { webServer } from '../http-server/services';
 import { USER_DASHBOARD } from '../user-dashboard/index.ts';
 import { devicePanels } from '../web-ui/services';
 import { api } from './api';
@@ -22,7 +22,7 @@ export default {
 	chips: ['esp32', 'esp32s3', 'esp32c3', 'esp32c6'],
 	activate({ use, find, has }) {
 		use(matterController);
-		use(deviceApi).register(...api);
+		use(webServer).register({ api });
 		use(firmware).register(() => ({
 			sources: { 'espm_scenes.cpp': scenesCpp },
 			hooks: {

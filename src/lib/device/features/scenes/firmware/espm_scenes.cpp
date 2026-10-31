@@ -7,7 +7,7 @@
 // the admin's decision – but not change it. The owner only switches the lights they may still
 // control, so taking a light away from someone also takes it out of their scenes.
 #include "espm_config.h"
-#include "espm_matter.h"
+#include "espm_matter_web.h"
 #include "espm_web.h"
 
 #include <cstring>

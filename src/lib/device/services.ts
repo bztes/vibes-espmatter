@@ -6,7 +6,7 @@
  *    brings with the chip's services. Those of every chip are in `features/core/services.ts`,
  *    the others in the `services.ts` of the feature that brings them. The names say where it ends up:
  *     - `device…` / `firmware`: runs on the ESP – its firmware, and from features that bring them
- *       the device's REST API docs (`deviceApi`, `features/http-server/services.ts`) and the
+ *       the device's REST API docs (`webServer`, `features/http-server/services.ts`) and the
  *       pages and panels of its web interface (`devicePages`, `devicePanels`,
  *       `features/web-ui/services.ts`). Those only exist on chips with that feature.
  *     - `configurator…` / `flashMethods`: runs in this web app – the feature's settings editor,
