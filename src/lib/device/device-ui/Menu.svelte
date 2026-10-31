@@ -1,6 +1,7 @@
 <!--
 	A button that opens a small dropdown of actions. Closes on pick, outside click, Escape and
-	scrolling. Positioned `fixed`, so it isn't clipped by scrolling containers like table wrappers.
+	scrolling. Positioned `fixed`, so it isn't clipped by scrolling containers like table wrappers;
+	opens upwards when it doesn't fit below the trigger.
 -->
 <script lang="ts" module>
 	import type { Component, Snippet } from 'svelte';
@@ -37,7 +38,7 @@
 
 	let open = $state(false);
 	let root = $state<HTMLElement>();
-	let pos = $state({ top: 0, right: 0 });
+	let pos = $state<{ top?: number; bottom?: number; right: number }>({ right: 0 });
 
 	function toggle() {
 		if (!open && root) {
@@ -45,6 +46,16 @@
 			pos = { top: r.bottom + 4, right: window.innerWidth - r.right };
 		}
 		open = !open;
+	}
+
+	/** Flips the opened menu above the trigger if there's more room there than below. */
+	function place(menu: HTMLElement) {
+		if (!root) return;
+		const r = root.getBoundingClientRect();
+		const below = window.innerHeight - r.bottom - 4;
+		if (menu.offsetHeight > below && r.top - 4 > below) {
+			pos = { bottom: window.innerHeight - r.top + 4, right: window.innerWidth - r.right };
+		}
 	}
 
 	function pick(item: MenuItem) {
@@ -73,7 +84,9 @@
 		<div
 			class="fixed z-20 grid min-w-[180px] rounded-[10px] border bg-card p-1 shadow-[0_8px_24px_rgb(0_0_0/0.15)]"
 			role="menu"
-			style:top="{pos.top}px"
+			{@attach place}
+			style:top={pos.top === undefined ? undefined : `${pos.top}px`}
+			style:bottom={pos.bottom === undefined ? undefined : `${pos.bottom}px`}
 			style:right="{pos.right}px"
 		>
 			{#each items as item (item.label)}
