@@ -36,7 +36,7 @@
 	const lights = $derived<LightChoice[]>(
 		(nodes.data?.nodes ?? []).flatMap((node) =>
 			node.endpoints
-				.filter((ep) => LIGHT_TYPES.includes(ep.deviceType))
+				.filter((ep) => LIGHT_TYPES.includes(ep.deviceType) && !ep.readOnly)
 				.map((endpoint) => ({
 					key: `${node.id}:${endpoint.id}`,
 					node: node.id,

@@ -9,7 +9,7 @@ export const api: DeviceApiRoute[] = [
 		path: '/api/matter/nodes',
 		summary: 'Paired devices with their endpoints and last known state',
 		description:
-			'Users get only the endpoints they were given (`/api/matter/access`). Light state, sensor values and `switchFeatures` (FeatureMap of a button’s Switch cluster) appear once read or reported; temperature in 0.01 °C, humidity in 0.01 %, ages and `lastSeen` in seconds.',
+			'Users get only the endpoints they were given (`/api/matter/access`); those they may only view have `readOnly: true`. Light state, sensor values and `switchFeatures` (FeatureMap of a button’s Switch cluster) appear once read or reported; temperature in 0.01 °C, humidity in 0.01 %, ages and `lastSeen` in seconds.',
 		access: 'user',
 		response: {
 			nodes: [
@@ -76,7 +76,7 @@ export const api: DeviceApiRoute[] = [
 		path: '/api/matter/node',
 		summary: 'Act on a paired device',
 		description:
-			'`rename` (`name`), `tag` (`tags`), `refresh` (read vendor, product and endpoints again), `state` (read light state now), `invoke` (send a cluster command), `remove` (unpair, then forget) or `forget` (only drop it here). Users may only `state` and `invoke` On/Off, Level Control and Color Control on their lights.',
+			'`rename` (`name`), `tag` (`tags`), `refresh` (read vendor, product and endpoints again), `state` (read light state now), `invoke` (send a cluster command), `remove` (unpair, then forget) or `forget` (only drop it here). Users may only `state` the devices they see and `invoke` On/Off, Level Control and Color Control on the lights they control.',
 		access: 'user',
 		params: [
 			{ ...NODE_ID, required: true },
@@ -108,8 +108,17 @@ export const api: DeviceApiRoute[] = [
 		method: 'GET',
 		path: '/api/matter/access',
 		summary: 'The lights and sensors each user may see and control',
+		description: '`readOnly`: the user only sees the endpoint, without controlling it.',
 		access: 'admin',
-		response: { max: 16, users: { anna: [{ node: 1, endpoint: 1 }] } }
+		response: {
+			max: 16,
+			users: {
+				anna: [
+					{ node: 1, endpoint: 1 },
+					{ node: 2, endpoint: 1, readOnly: true }
+				]
+			}
+		}
 	},
 	{
 		method: 'POST',
@@ -121,8 +130,14 @@ export const api: DeviceApiRoute[] = [
 			{
 				name: 'lights',
 				type: 'string',
-				description: 'Comma-separated `node:endpoint` pairs (max. 16); empty: none',
+				description: 'Comma-separated `node:endpoint` pairs the user controls; empty: none',
 				required: true
+			},
+			{
+				name: 'view',
+				type: 'string',
+				description:
+					'Comma-separated `node:endpoint` pairs the user only sees (max. 16 together with `lights`)'
 			}
 		],
 		response: { ok: true }

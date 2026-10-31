@@ -1,4 +1,7 @@
-<!-- One light or plug: big on/off button, brightness and color temperature, power draw if measured. -->
+<!--
+	One light or plug: big on/off button, brightness and color temperature, power draw if measured.
+	A user who may only view it gets the same tile with the controls disabled.
+-->
 <script lang="ts">
 	import { api, errorMessage, hexId } from '../../web-ui/device-ui/api';
 	import { Slider } from '../../../device-ui/ui';
@@ -32,6 +35,7 @@
 	const TRANSITION = 5; // 1/10 s
 	const DEFAULT_CT = { min: 153, max: 500 };
 
+	const readOnly = $derived(endpoint.readOnly ?? false);
 	const dimmable = $derived(DIMMABLE_TYPES.includes(endpoint.deviceType));
 	const hasCt = $derived(COLOR_TEMPERATURE_TYPES.includes(endpoint.deviceType));
 	const ctMin = $derived(endpoint.ctMinMireds ?? DEFAULT_CT.min);
@@ -121,16 +125,18 @@
 			<strong class="truncate">{name}</strong>
 			<span class="text-xs text-muted">
 				{#if !reachable}<span class="text-warn">not reachable</span>{:else}{status}{/if}
+				{#if readOnly}· view only{/if}
 			</span>
 		</div>
 		<button
 			class={[
-				'grid size-[46px] cursor-pointer place-items-center rounded-full border p-0',
+				'grid size-[46px] cursor-pointer place-items-center rounded-full border p-0 disabled:cursor-default',
 				on ? 'border-[#f6b44c] bg-[#f6b44c] text-[#3b2600]' : 'bg-bg text-muted'
 			]}
 			onclick={toggle}
+			disabled={readOnly}
 			aria-pressed={on}
-			title={on ? 'Turn off' : 'Turn on'}
+			title={readOnly ? 'View only' : on ? 'Turn off' : 'Turn on'}
 			aria-label="{on ? 'Turn off' : 'Turn on'} {name}"
 		>
 			<svg
@@ -158,7 +164,7 @@
 	{#if dimmable}
 		<label class="block">
 			<span class="mb-0.5 block text-xs text-muted">Brightness</span>
-			<Slider min={1} max={254} value={level} onchange={setLevel} />
+			<Slider min={1} max={254} value={level} disabled={readOnly} onchange={setLevel} />
 		</label>
 	{/if}
 	{#if hasCt}
@@ -170,6 +176,7 @@
 				max={kelvin(ctMin)}
 				step="50"
 				value={kelvin(ct)}
+				disabled={readOnly}
 				onchange={setKelvin}
 			/>
 		</label>

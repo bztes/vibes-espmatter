@@ -7,15 +7,21 @@
 /** Routes of the web interface (espm_matter_web.cpp, espm_matter_access.cpp): /api/matter/…. */
 void mesp_matter_register_web();
 
+/** What a user may do with an endpoint: nothing, see it (and its state), or also control it. */
+typedef enum { MESP_ACCESS_NONE, MESP_ACCESS_VIEW, MESP_ACCESS_CONTROL } mesp_access_t;
+
 /**
- * May the caller see and control endpoint `ep` of node `node` (`/api/matter`, and features that
- * act on endpoints for users, e.g. timers)? Admins always; users only as the access rule says
- * (espm_matter_access.cpp: the endpoints an admin gave them).
+ * May the caller control endpoint `ep` of node `node` (`/api/matter`, and features that act on
+ * endpoints for users, e.g. timers)? Admins always; users only as the access rule says
+ * (espm_matter_access.cpp: the endpoints an admin gave them to control).
  */
 bool mesp_matter_allows(const mesp_session_t &session, uint64_t node, uint16_t ep);
 
+/** May the caller see endpoint `ep` of node `node` and its state – to control it or only to view it? */
+bool mesp_matter_shows(const mesp_session_t &session, uint64_t node, uint16_t ep);
+
 /** The access rule for users who aren't admins (espm_matter_access.cpp). */
-void mesp_matter_set_access(bool (*allows)(const char *user, uint64_t node, uint16_t ep));
+void mesp_matter_set_access(mesp_access_t (*access)(const char *user, uint64_t node, uint16_t ep));
 
 void mesp_matter_access_init();
 void mesp_matter_access_register_web();

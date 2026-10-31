@@ -26,22 +26,34 @@ static const char *network_str(uint8_t n)
     }
 }
 
-static bool (*s_access)(const char *user, uint64_t node, uint16_t ep) = nullptr;
+static mesp_access_t (*s_access)(const char *user, uint64_t node, uint16_t ep) = nullptr;
 
-void mesp_matter_set_access(bool (*allows)(const char *user, uint64_t node, uint16_t ep))
+void mesp_matter_set_access(mesp_access_t (*access)(const char *user, uint64_t node, uint16_t ep))
 {
-    s_access = allows;
+    s_access = access;
+}
+
+static mesp_access_t access_of(const mesp_session_t &session, uint64_t node, uint16_t ep)
+{
+    if (session.role == MESP_ROLE_ADMIN) return MESP_ACCESS_CONTROL;
+    if (session.role != MESP_ROLE_USER || !s_access) return MESP_ACCESS_NONE;
+    return s_access(session.user, node, ep);
 }
 
 bool mesp_matter_allows(const mesp_session_t &session, uint64_t node, uint16_t ep)
 {
-    if (session.role == MESP_ROLE_ADMIN) return true;
-    return session.role == MESP_ROLE_USER && s_access && s_access(session.user, node, ep);
+    return access_of(session, node, ep) == MESP_ACCESS_CONTROL;
+}
+
+bool mesp_matter_shows(const mesp_session_t &session, uint64_t node, uint16_t ep)
+{
+    return access_of(session, node, ep) != MESP_ACCESS_NONE;
 }
 
 static esp_err_t nodes_handler(httpd_req_t *req)
 {
-    // Users only get the endpoints the access rule gives them (mesp_matter_set_access).
+    // Users only get the endpoints the access rule gives them (mesp_matter_set_access); those they
+    // may only view are marked `readOnly`.
     mesp_session_t session;
     if (!mesp_web_require(req, MESP_ROLE_USER, &session)) return ESP_OK;
     Json j;
@@ -53,7 +65,7 @@ static esp_err_t nodes_handler(httpd_req_t *req)
             const mesp_node_t &n = s_nodes[i];
             // Admins also see nodes whose endpoints are not read yet, so they can refresh or remove them.
             bool visible = session.role == MESP_ROLE_ADMIN;
-            for (uint8_t e = 0; e < n.ep_count; e++) visible |= mesp_matter_allows(session, n.node_id, n.ep[e]);
+            for (uint8_t e = 0; e < n.ep_count; e++) visible |= mesp_matter_shows(session, n.node_id, n.ep[e]);
             if (!visible) continue;
             j.obj();
             j.key("id").unum(n.node_id);
@@ -94,9 +106,11 @@ static esp_err_t nodes_handler(httpd_req_t *req)
             }
             j.key("endpoints").arr();
             for (uint8_t e = 0; e < n.ep_count; e++) {
-                if (!mesp_matter_allows(session, n.node_id, n.ep[e])) continue;
+                mesp_access_t access = access_of(session, n.node_id, n.ep[e]);
+                if (access == MESP_ACCESS_NONE) continue;
                 const mesp_light_t &l = s_light[i][e];
                 j.obj().key("id").num(n.ep[e]).key("deviceType").num(n.device_type[e]);
+                if (access == MESP_ACCESS_VIEW) j.key("readOnly").boolean(true);
                 if (l.on >= 0) j.key("on").boolean(l.on);
                 if (l.level >= 0) j.key("level").num(l.level);
                 if (l.ct >= 0) j.key("ctMireds").num(l.ct);
@@ -177,14 +191,15 @@ static esp_err_t node_action_handler(httpd_req_t *req)
     }
     if (idx < 0) return mesp_web_send_error(req, "404 Not Found", "unknown node");
 
-    // Dashboard users may read the state of their lights and switch, dim or tint them – nothing else.
+    // Dashboard users may read the state of the lights they see and switch, dim or tint those they
+    // control – nothing else.
     if (session.role != MESP_ROLE_ADMIN) {
         std::string ep_str, cluster_str;
         uint64_t ep = 0, cluster = 0;
         bool allowed = false;
         if (action == "state") {
             NodesLock lock;
-            for (uint8_t e = 0; e < s_nodes[idx].ep_count; e++) allowed |= mesp_matter_allows(session, node_id, s_nodes[idx].ep[e]);
+            for (uint8_t e = 0; e < s_nodes[idx].ep_count; e++) allowed |= mesp_matter_shows(session, node_id, s_nodes[idx].ep[e]);
         } else if (action == "invoke" && mesp_web_param(body, "endpoint", ep_str) && mesp_parse_u64(ep_str, ep) &&
                    mesp_web_param(body, "cluster", cluster_str) && mesp_parse_u64(cluster_str, cluster)) {
             allowed = (cluster == OnOff::Id || cluster == LevelControl::Id || cluster == ColorControl::Id) &&

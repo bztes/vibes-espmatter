@@ -5,6 +5,8 @@ import { live } from '../../web-ui/device-ui/live.svelte';
 export interface MatterEndpoint {
 	id: number;
 	deviceType: number;
+	/** Users only: shown to them, but they may not control it. */
+	readOnly?: boolean;
 	on?: boolean;
 	level?: number;
 	ctMireds?: number;
