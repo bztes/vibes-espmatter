@@ -8,16 +8,16 @@ import scenesCpp from './firmware/espm_scenes.cpp?raw';
 import { matterController } from '../matter-controller/services';
 
 /**
- * Scenes: lights switched all at once, each on/off at a brightness and color temperature ("Movie
- * night"). Adds `/api/scenes` to the HTTP server; with the user dashboard everyone creates and runs
- * their scenes there (from the lights they may control), with the admin dashboard admins share
- * them with other users.
+ * Scenes: lights and plugs switched all at once, each on/off at a brightness and color temperature
+ * ("Movie night"). Adds `/api/scenes` to the HTTP server; with the user dashboard everyone creates
+ * and runs their scenes there (from the endpoints they may control), with the admin dashboard
+ * admins share them with other users.
  */
 export default {
 	id: 'scenes',
 	dir: 'scenes',
 	name: 'Scenes',
-	description: 'Switch several lights at once, set up on the user dashboard.',
+	description: 'Switch several lights and plugs at once, set up on the user dashboard.',
 	category: 'matter',
 	chips: ['esp32', 'esp32s3', 'esp32c3', 'esp32c6'],
 	activate({ use, find, has }) {

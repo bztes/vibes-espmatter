@@ -58,11 +58,11 @@ const validate: Validate<MatterControllerConfig> = ({ config }) => {
  * to what they report (buttons, battery, sensors, on/off).
  *
  * Devices are paired through its `/api/matter/…` on the HTTP server: list, pair, control and
- * remove devices, their values and button events, and which lights each user may use
- * (`/api/matter/access`, the access rule other features like timers go through). Without the HTTP
+ * remove devices, their values and button events, and which endpoints each user may see and
+ * control (`/api/matter/access`, the access rule other features like timers go through). Without the HTTP
  * server it keeps the devices paired before, e.g. for automations, but can't pair new ones. Pairing over
  * Thread needs Matter controller Thread (`matter_controller_thread`). Its panels: the devices on the admin dashboard,
- * light tiles on the user dashboard (with who gets which lights on the admin dashboard).
+ * tiles on the user dashboard (with who gets which endpoints on the admin dashboard).
  */
 export default {
 	id: 'matter_controller',

@@ -1,7 +1,7 @@
 // Shared by the Matter panels (and other features' panels that show Matter devices).
 import { live } from '../../web-ui/device-ui/live.svelte';
 
-/** An endpoint as reported by `GET /api/matter/nodes`; light state and sensor values only once read or reported. */
+/** An endpoint as reported by `GET /api/matter/nodes`; on/off state and sensor values only once read or reported. */
 export interface MatterEndpoint {
 	id: number;
 	deviceType: number;
@@ -80,8 +80,8 @@ export const DEVICE_TYPES: Record<number, string> = {
 	0x0307: 'Humidity Sensor'
 };
 
-/** Lights and plugs: things that can be switched. */
-export const LIGHT_TYPES = [0x0100, 0x0101, 0x010c, 0x010d, 0x010a, 0x010b];
+/** Switchable endpoints: lights and plugs. */
+export const SWITCHABLE_TYPES = [0x0100, 0x0101, 0x010c, 0x010d, 0x010a, 0x010b];
 export const PLUG_TYPES = [0x010a, 0x010b];
 export const DIMMABLE_TYPES = [0x0101, 0x010c, 0x010d, 0x010b];
 export const COLOR_TEMPERATURE_TYPES = [0x010c, 0x010d];

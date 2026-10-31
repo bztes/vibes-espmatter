@@ -1,4 +1,4 @@
-<!-- Create or edit a timer: light, time and days (or once in X minutes), what to do and how slowly. -->
+<!-- Create or edit a timer: light or plug, time and days (or once in X minutes), what to do and how slowly. -->
 <script lang="ts">
 	import { api, errorMessage, hexId } from '../../web-ui/device-ui/api';
 	import {
@@ -27,16 +27,16 @@
 		levelToPercent,
 		miredsToKelvin,
 		percentToLevel,
-		type LightChoice,
+		type EndpointChoice,
 		type Timer,
 		type TimerAction
 	} from './timers';
 
 	let {
-		lights,
+		endpoints,
 		onsaved
 	}: {
-		lights: LightChoice[];
+		endpoints: EndpointChoice[];
 		onsaved: () => void;
 	} = $props();
 
@@ -67,7 +67,7 @@
 
 	let dialog = $state<ReturnType<typeof Dialog>>();
 	let editing = $state<Timer | null>(null);
-	let lightKey = $state('');
+	let endpointKey = $state('');
 	/** At a time of day (recurring) or once in `inMinutes`. */
 	let when = $state(DEFAULTS.when);
 	let time = $state(DEFAULTS.time);
@@ -87,21 +87,21 @@
 	let error = $state('');
 	let busy = $state(false);
 
-	const light = $derived(lights.find((l) => l.key === lightKey));
-	const dimmable = $derived(light ? DIMMABLE_TYPES.includes(light.endpoint.deviceType) : false);
+	const choice = $derived(endpoints.find((l) => l.key === endpointKey));
+	const dimmable = $derived(choice ? DIMMABLE_TYPES.includes(choice.endpoint.deviceType) : false);
 	const hasCt = $derived(
-		light ? COLOR_TEMPERATURE_TYPES.includes(light.endpoint.deviceType) : false
+		choice ? COLOR_TEMPERATURE_TYPES.includes(choice.endpoint.deviceType) : false
 	);
 	// Warm = many mireds = few kelvin.
-	const kMin = $derived(miredsToKelvin(light?.endpoint.ctMaxMireds ?? DEFAULT_CT.max));
-	const kMax = $derived(miredsToKelvin(light?.endpoint.ctMinMireds ?? DEFAULT_CT.min));
+	const kMin = $derived(miredsToKelvin(choice?.endpoint.ctMaxMireds ?? DEFAULT_CT.max));
+	const kMax = $derived(miredsToKelvin(choice?.endpoint.ctMinMireds ?? DEFAULT_CT.min));
 
-	/** Open for a new timer (optionally for a light) or to edit `timer`. */
-	export function open(timer?: Timer, forLight?: string) {
+	/** Open for a new timer (optionally for an endpoint) or to edit `timer`. */
+	export function open(timer?: Timer, forEndpoint?: string) {
 		editing = timer ?? null;
 		error = '';
 		if (timer) {
-			lightKey = `${timer.node}:${timer.endpoint}`;
+			endpointKey = `${timer.node}:${timer.endpoint}`;
 			when = isOnce(timer) ? 'in' : 'at';
 			time = fmtMinute(timer.minute);
 			days = isOnce(timer) ? DEFAULTS.days : timer.days;
@@ -120,7 +120,7 @@
 			startKelvin = timer.startMireds ? miredsToKelvin(timer.startMireds) : DEFAULTS.startKelvin;
 			name = timer.name;
 		} else {
-			lightKey = forLight ?? lights[0]?.key ?? '';
+			endpointKey = forEndpoint ?? endpoints[0]?.key ?? '';
 			({
 				when,
 				time,
@@ -149,7 +149,7 @@
 
 	async function save(ev: SubmitEvent) {
 		ev.preventDefault();
-		if (!light) return;
+		if (!choice) return;
 		const [h, m] = time.split(':').map(Number);
 		const level = action !== 'off' && dimmable && setLevel ? percentToLevel(percent) : 0;
 		const mireds = action !== 'off' && hasCt && setCt ? kelvinToMireds(kelvin) : 0;
@@ -168,8 +168,8 @@
 				body: {
 					op: editing ? 'set' : 'add',
 					id: editing?.id,
-					node: hexId(light.node),
-					endpoint: light.endpoint.id,
+					node: hexId(choice.node),
+					endpoint: choice.endpoint.id,
 					// Once: the device counts from its own clock (and restarts the countdown on edit).
 					...(when === 'in' ? { in: inMinutes } : { minute: h * 60 + m, days }),
 					action,
@@ -195,8 +195,8 @@
 	<form class="grid gap-2.5 [&_label]:m-0" onsubmit={save}>
 		<h2 class="m-0 text-md">{editing ? 'Edit timer' : 'New timer'}</h2>
 
-		<Select label="Light" bind:value={lightKey} required>
-			{#each lights as l (l.key)}<option value={l.key}>{l.name}</option>{/each}
+		<Select label="Light or plug" bind:value={endpointKey} required>
+			{#each endpoints as l (l.key)}<option value={l.key}>{l.name}</option>{/each}
 		</Select>
 
 		<Segmented
@@ -337,7 +337,7 @@
 		{#if error}<Alert>{error}</Alert>{/if}
 		<div class="flex flex-wrap items-center justify-end gap-2">
 			<Button onclick={() => dialog?.close()}>Cancel</Button>
-			<Button type="submit" variant="primary" disabled={busy || !light}
+			<Button type="submit" variant="primary" disabled={busy || !choice}
 				>{busy ? 'Saving…' : 'Save'}</Button
 			>
 		</div>

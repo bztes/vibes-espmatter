@@ -1,6 +1,6 @@
 <!--
 	All logins (espm_auth.cpp): admins, and users who may only use what other features give them
-	(e.g. the lights the Matter controller gives them, in its own panel).
+	(e.g. the endpoints the Matter controller gives them, in its own panel).
 -->
 <script lang="ts">
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';

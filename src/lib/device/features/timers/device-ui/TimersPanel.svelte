@@ -1,5 +1,5 @@
 <!--
-	Timers on the dashboard (espm_timers.cpp). Everyone sees and edits the timers of the lights
+	Timers on the dashboard (espm_timers.cpp). Everyone sees and edits the timers of the endpoints
 	they may control – the device filters the list. Admins set the time zone (click the clock).
 -->
 <script lang="ts">
@@ -15,7 +15,11 @@
 	import Menu from '../../../device-ui/Menu.svelte';
 	import Panel from '../../web-ui/device-ui/Panel.svelte';
 	import { Alert, Badge, Button, Select, showConfirm, Switch } from '../../../device-ui/ui';
-	import { LIGHT_TYPES, endpointName, matterNodes } from '../../matter-controller/device-ui/matter';
+	import {
+		SWITCHABLE_TYPES,
+		endpointName,
+		matterNodes
+	} from '../../matter-controller/device-ui/matter';
 	import TimerDialog from './TimerDialog.svelte';
 	import {
 		daysLabel,
@@ -24,7 +28,7 @@
 		inWords,
 		isOnce,
 		minutesUntil,
-		type LightChoice,
+		type EndpointChoice,
 		type Timer,
 		type TimersResponse
 	} from './timers';
@@ -33,10 +37,10 @@
 	const timers = live<TimersResponse>('/api/timers', 30_000);
 	const nodes = matterNodes();
 
-	const lights = $derived<LightChoice[]>(
+	const endpoints = $derived<EndpointChoice[]>(
 		(nodes.data?.nodes ?? []).flatMap((node) =>
 			node.endpoints
-				.filter((ep) => LIGHT_TYPES.includes(ep.deviceType) && !ep.readOnly)
+				.filter((ep) => SWITCHABLE_TYPES.includes(ep.deviceType) && !ep.readOnly)
 				.map((endpoint) => ({
 					key: `${node.id}:${endpoint.id}`,
 					node: node.id,
@@ -45,8 +49,8 @@
 				}))
 		)
 	);
-	const lightName = (t: Timer) =>
-		lights.find((l) => l.key === `${t.node}:${t.endpoint}`)?.name ?? 'Unknown light';
+	const endpointLabel = (t: Timer) =>
+		endpoints.find((l) => l.key === `${t.node}:${t.endpoint}`)?.name ?? 'Unknown device';
 	// One-shot timers first, soonest first; then the recurring ones by time of day.
 	const sorted = $derived(
 		[...(timers.data?.timers ?? [])].sort((a, b) =>
@@ -104,7 +108,7 @@
 		const what = isOnce(t) ? 'Cancel' : 'Delete';
 		const ok = await showConfirm(
 			`${what} timer`,
-			`${what} the ${fmtMinute(t.minute)} timer of ${lightName(t)}?`,
+			`${what} the ${fmtMinute(t.minute)} timer of ${endpointLabel(t)}?`,
 			{
 				action: what,
 				danger: true
@@ -137,7 +141,7 @@
 			{#if isAdmin && clock && !clock.tz && zone === undefined}
 				<Badge tone="warn" onclick={editZone}>Set time zone</Badge>
 			{/if}
-			{#if lights.length && timers.data && timers.data.count < timers.data.max}
+			{#if endpoints.length && timers.data && timers.data.count < timers.data.max}
 				<Button onclick={() => dialog?.open()}><Plus size={15} /> New timer</Button>
 			{/if}
 		</span>
@@ -162,13 +166,13 @@
 		<p class="text-muted">{timers.error ?? 'Loading…'}</p>
 	{:else if sorted.length === 0}
 		<p class="text-muted">
-			{lights.length ? 'No timers yet.' : 'No lights you could set a timer for.'}
+			{endpoints.length ? 'No timers yet.' : 'No lights or plugs you could set a timer for.'}
 		</p>
 	{:else}
 		{#if next}
 			<p class="mt-0 mb-2 text-sm text-muted">
 				Next: {fmtMinute(next.timer.minute)}
-				{lightName(next.timer)} ({inWords(next.in)})
+				{endpointLabel(next.timer)} ({inWords(next.in)})
 			</p>
 		{/if}
 		<ul class="m-0 list-none p-0">
@@ -178,9 +182,9 @@
 						>{fmtMinute(t.minute)}</span
 					>
 					<div class={['grid min-w-0 flex-1 text-sm', !t.enabled && 'opacity-45']}>
-						<strong>{t.name || lightName(t)}</strong>
+						<strong>{t.name || endpointLabel(t)}</strong>
 						<span class="text-muted">
-							{t.name ? `${lightName(t)} · ` : ''}{daysLabel(t.days)}{isOnce(t)
+							{t.name ? `${endpointLabel(t)} · ` : ''}{daysLabel(t.days)}{isOnce(t)
 								? ` · ${inWords(Math.ceil((t.remaining ?? 0) / 60))}`
 								: ''}
 						</span>
@@ -220,4 +224,4 @@
 	{#if error}<Alert>{error}</Alert>{/if}
 </Panel>
 
-<TimerDialog bind:this={dialog} {lights} onsaved={timers.refresh} />
+<TimerDialog bind:this={dialog} {endpoints} onsaved={timers.refresh} />

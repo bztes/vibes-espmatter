@@ -5,7 +5,7 @@
 	import Panel from '../../web-ui/device-ui/Panel.svelte';
 	import { Segmented } from '../../../device-ui/ui';
 	import {
-		LIGHT_TYPES,
+		SWITCHABLE_TYPES,
 		PLUG_TYPES,
 		SENSOR_TYPES,
 		endpointName,
@@ -13,12 +13,15 @@
 		nodeName,
 		type MatterNode
 	} from './matter';
-	import LightTile from './LightTile.svelte';
+	import SwitchableTile from './SwitchableTile.svelte';
 	import SensorTile from './SensorTile.svelte';
 
-	/** Light state is only read on demand – refresh it now and then for changes made elsewhere. */
+	/**
+	 * On/off, brightness and color temperature are only read on demand – refresh them now and then
+	 * for changes made elsewhere.
+	 */
 	const STATE_REFRESH_MS = 30_000;
-	/** A light that didn't answer for this long is shown as not reachable. */
+	/** An endpoint that didn't answer for this long is shown as not reachable. */
 	const STALE_S = 15 * 60;
 	const GROUPINGS = [
 		['none', 'All'],
@@ -53,7 +56,7 @@
 	const tiles = $derived(
 		(nodes.data?.nodes ?? []).flatMap((node) =>
 			node.endpoints
-				.filter((ep) => LIGHT_TYPES.includes(ep.deviceType))
+				.filter((ep) => SWITCHABLE_TYPES.includes(ep.deviceType))
 				.map((ep, _, switchable) => ({
 					node,
 					ep,
@@ -92,12 +95,13 @@
 	);
 
 	type Item =
-		({ kind: 'light' } & (typeof tiles)[number]) | ({ kind: 'sensor' } & (typeof sensors)[number]);
+		| ({ kind: 'switchable' } & (typeof tiles)[number])
+		| ({ kind: 'sensor' } & (typeof sensors)[number]);
 	const byName = (a: string, b: string) =>
 		a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 	const items = $derived<Item[]>(
 		[
-			...tiles.map((t) => ({ kind: 'light' as const, ...t })),
+			...tiles.map((t) => ({ kind: 'switchable' as const, ...t })),
 			...sensors.map((s) => ({ kind: 'sensor' as const, ...s }))
 		].sort((a, b) => byName(a.name, b.name))
 	);
@@ -129,7 +133,7 @@
 	}
 
 	onMount(() => {
-		// Wait for the node list, then read all lights once and every 30 s.
+		// Wait for the node list, then read all lights and plugs once and every 30 s.
 		const first = setTimeout(readStates, 800);
 		const timer = setInterval(
 			() => document.visibilityState === 'visible' && readStates(),
@@ -158,8 +162,8 @@
 					{#if group.title}<h3 class="text-sm text-muted">{group.title}</h3>{/if}
 					<div class="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
 						{#each group.items as item (item.key)}
-							{#if item.kind === 'light'}
-								<LightTile
+							{#if item.kind === 'switchable'}
+								<SwitchableTile
 									nodeId={item.node.id}
 									name={item.name}
 									endpoint={item.ep}

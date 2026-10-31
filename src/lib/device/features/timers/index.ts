@@ -9,20 +9,20 @@ import { matterController } from '../matter-controller/services';
 import { clock } from '../ntp/services';
 
 /**
- * Timers that switch and fade lights of the Matter fabric at set times (time zone: set by an admin
- * in the Timers panel). Adds `/api/timers` to the HTTP server and, with the user dashboard, the
- * Timers panel to it. Everyone sees the timers of the lights they may control (the Matter
+ * Timers that switch and fade lights and plugs of the Matter fabric at set times (time zone: set
+ * by an admin in the Timers panel). Adds `/api/timers` to the HTTP server and, with the user
+ * dashboard, the Timers panel to it. Everyone sees the timers of the endpoints they may control (the Matter
  * controller's access rule).
  */
 export default {
 	id: 'timers',
 	dir: 'timers',
 	name: 'Timers',
-	description: 'Switch and fade lights at set times, set up on the user dashboard.',
+	description: 'Switch and fade lights and plugs at set times, set up on the user dashboard.',
 	category: 'matter',
 	chips: ['esp32', 'esp32s3', 'esp32c3', 'esp32c6'],
 	activate({ use, find, has }) {
-		// The lights are the Matter controller's, the clock is NTP's.
+		// The endpoints are the Matter controller's, the clock is NTP's.
 		use(matterController);
 		use(clock);
 		use(webServer).register({ api });

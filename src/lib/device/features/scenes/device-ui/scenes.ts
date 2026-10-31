@@ -1,15 +1,15 @@
 // Scenes (espm_scenes.cpp): types and helpers shared by the panels and the dialog.
 import type { MatterEndpoint } from '../../matter-controller/device-ui/matter';
 
-/** A light a scene can switch (one endpoint of a node). */
-export interface LightChoice {
+/** A light or plug a scene can switch (one endpoint of a node). */
+export interface EndpointChoice {
 	key: string;
 	node: number;
 	name: string;
 	endpoint: MatterEndpoint;
 }
 
-export interface SceneLight {
+export interface SceneEndpoint {
 	node: number;
 	endpoint: number;
 	on: boolean;
@@ -25,12 +25,12 @@ export interface Scene {
 	owner: string;
 	/** Whom it's shared with: only for its owner and admins. */
 	shared?: string[];
-	lights: SceneLight[];
+	endpoints: SceneEndpoint[];
 }
 
 export interface ScenesResponse {
 	max: number;
-	maxLights: number;
+	maxEndpoints: number;
 	count: number;
 	scenes: Scene[];
 }
@@ -42,11 +42,11 @@ export const percentToLevel = (p: number) =>
 export const miredsToKelvin = (m: number) => Math.round(1_000_000 / m / 50) * 50;
 export const kelvinToMireds = (k: number) => Math.round(1_000_000 / k);
 
-/** "3 lights · 2 on" */
+/** "3 devices · 2 on" */
 export function summary(scene: Scene): string {
-	const n = scene.lights.length;
-	if (!n) return 'No lights';
-	const on = scene.lights.filter((l) => l.on).length;
-	const lights = `${n} light${n === 1 ? '' : 's'}`;
-	return on === n ? `${lights} on` : on === 0 ? `${lights} off` : `${lights} · ${on} on`;
+	const n = scene.endpoints.length;
+	if (!n) return 'No devices';
+	const on = scene.endpoints.filter((l) => l.on).length;
+	const devices = `${n} device${n === 1 ? '' : 's'}`;
+	return on === n ? `${devices} on` : on === 0 ? `${devices} off` : `${devices} · ${on} on`;
 }

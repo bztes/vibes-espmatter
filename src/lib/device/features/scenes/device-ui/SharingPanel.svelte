@@ -1,6 +1,6 @@
 <!--
 	Admin dashboard: whom each scene is shared with (espm_scenes.cpp). Users it's shared with see it
-	on their dashboard and may run it – all of its lights, also those they don't get otherwise – but
+	on their dashboard and may run it – all of its endpoints, also those they don't get otherwise – but
 	not change it.
 -->
 <script lang="ts">

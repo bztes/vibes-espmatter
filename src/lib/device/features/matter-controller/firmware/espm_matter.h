@@ -78,8 +78,8 @@ void mesp_matter_on_node_removed(void (*cb)(uint64_t node_id));
 /** Endpoints kept per node (the root endpoint not counted). */
 #define MESP_MAX_EPS 8
 
-/** Last known light state of an endpoint (-1 = unknown). */
-struct mesp_light_t {
+/** Last known on/off, brightness and color temperature of an endpoint (-1 = unknown). */
+struct mesp_endpoint_state_t {
     int8_t on;
     int16_t level;  // LevelControl CurrentLevel, 0..254
     int32_t ct;     // ColorControl ColorTemperatureMireds
@@ -124,9 +124,9 @@ struct mesp_node_values {
     const mesp_battery_t *battery;
     const mesp_power_t *power;
     uint8_t ep_count;
-    const uint16_t *ep;            // ep_count endpoints
-    const mesp_measure_t *measure; // per endpoint
-    const mesp_light_t *light;     // per endpoint
+    const uint16_t *ep;                 // ep_count endpoints
+    const mesp_measure_t *measure;      // per endpoint
+    const mesp_endpoint_state_t *state; // per endpoint: on/off, brightness, color temperature
 };
 
 /**

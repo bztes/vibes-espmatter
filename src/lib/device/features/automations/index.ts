@@ -7,8 +7,8 @@ import automationCpp from './firmware/espm_automation.cpp?raw';
 import { matterController } from '../matter-controller/services';
 
 /**
- * Automations: buttons of Matter switches control lights through the hub ("button 1 · press →
- * lamp: toggle"). The button events come from the Matter controller's subscriptions. Adds
+ * Automations: buttons of Matter switches control lights and plugs through the hub ("button 1 ·
+ * press → lamp: toggle"). The button events come from the Matter controller's subscriptions. Adds
  * `/api/automations` to the HTTP server and, with the admin dashboard, the Automations section to
  * it.
  */
@@ -16,7 +16,8 @@ export default {
 	id: 'automations',
 	dir: 'automations',
 	name: 'Automations',
-	description: 'Buttons of Matter switches control lights, set up on the admin dashboard.',
+	description:
+		'Buttons of Matter switches control lights and plugs, set up on the admin dashboard.',
 	category: 'matter',
 	chips: ['esp32', 'esp32s3', 'esp32c3', 'esp32c6'],
 	activate({ use, find, has }) {

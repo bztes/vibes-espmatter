@@ -13,14 +13,14 @@ export type UserDashboardConfig = ReturnType<typeof defaults>;
 /**
  * The user dashboard (at `/` by default): a page for every logged-in user, e.g. household members
  * with their own logins. It only brings the page: the panels and the API they use come from the
- * features (light tiles from the Matter controller, timers …). More users than the initial admin
+ * features (tiles from the Matter controller, timers …). More users than the initial admin
  * need the admin dashboard (user management).
  */
 export default {
 	id: 'user_dashboard',
 	dir: 'user-dashboard',
 	name: 'User dashboard',
-	description: 'Start page for everyone with a login, e.g. light tiles and timers.',
+	description: 'Start page for everyone with a login, e.g. device tiles and timers.',
 	category: 'ui',
 	defaults,
 	validate: checkPagePath,

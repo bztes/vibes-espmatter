@@ -9,7 +9,7 @@ export const api: DeviceApiRoute[] = [
 		path: '/api/matter/nodes',
 		summary: 'Paired devices with their endpoints and last known state',
 		description:
-			'Users get only the endpoints they were given (`/api/matter/access`); those they may only view have `readOnly: true`. Light state, sensor values and `switchFeatures` (FeatureMap of a button’s Switch cluster) appear once read or reported; temperature in 0.01 °C, humidity in 0.01 %, ages and `lastSeen` in seconds.',
+			'Users get only the endpoints they were given (`/api/matter/access`); those they may only view have `readOnly: true`. On/off state, sensor values and `switchFeatures` (FeatureMap of a button’s Switch cluster) appear once read or reported; temperature in 0.01 °C, humidity in 0.01 %, ages and `lastSeen` in seconds.',
 		access: 'user',
 		response: {
 			nodes: [
@@ -76,7 +76,7 @@ export const api: DeviceApiRoute[] = [
 		path: '/api/matter/node',
 		summary: 'Act on a paired device',
 		description:
-			'`rename` (`name`), `tag` (`tags`), `refresh` (read vendor, product and endpoints again), `state` (read light state now), `invoke` (send a cluster command), `remove` (unpair, then forget) or `forget` (only drop it here). Users may only `state` the devices they see and `invoke` On/Off, Level Control and Color Control on the lights they control.',
+			'`rename` (`name`), `tag` (`tags`), `refresh` (read vendor, product and endpoints again), `state` (read on/off state now), `invoke` (send a cluster command), `remove` (unpair, then forget) or `forget` (only drop it here). Users may only `state` the devices they see and `invoke` On/Off, Level Control and Color Control on the endpoints they control.',
 		access: 'user',
 		params: [
 			{ ...NODE_ID, required: true },
@@ -107,7 +107,7 @@ export const api: DeviceApiRoute[] = [
 	{
 		method: 'GET',
 		path: '/api/matter/access',
-		summary: 'The lights and sensors each user may see and control',
+		summary: 'The endpoints (lights, plugs, sensors) each user may see and control',
 		description: '`readOnly`: the user only sees the endpoint, without controlling it.',
 		access: 'admin',
 		response: {
@@ -123,21 +123,22 @@ export const api: DeviceApiRoute[] = [
 	{
 		method: 'POST',
 		path: '/api/matter/access',
-		summary: 'Set the lights and sensors of a user',
+		summary: 'Set the endpoints a user may see and control',
 		access: 'admin',
 		params: [
 			{ name: 'user', type: 'string', description: 'User name', required: true },
 			{
-				name: 'lights',
+				name: 'control',
 				type: 'string',
-				description: 'Comma-separated `node:endpoint` pairs the user controls; empty: none',
+				description:
+					'Comma-separated `node:endpoint` pairs the user controls; empty: none. `lights` is accepted as its old name',
 				required: true
 			},
 			{
 				name: 'view',
 				type: 'string',
 				description:
-					'Comma-separated `node:endpoint` pairs the user only sees (max. 16 together with `lights`)'
+					'Comma-separated `node:endpoint` pairs the user only sees (max. 16 together with `control`)'
 			}
 		],
 		response: { ok: true }

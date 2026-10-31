@@ -32,13 +32,13 @@ static void record(const mesp_node_values &node)
         mesp_otel_counter("matter.energy.imported", "kWh", node.power->energy_mwh / 1e6, attrs);
     for (uint8_t i = 0; i < node.ep_count; i++) {
         const mesp_measure_t &m = node.measure[i];
-        const mesp_light_t &light = node.light[i];
+        const mesp_endpoint_state_t &state = node.state[i];
         attrs_of(node, node.ep[i], attrs, sizeof(attrs));
         if (m.temp_at) mesp_otel_gauge("matter.temperature", "Cel", m.temp / 100.0, attrs);
         if (m.humidity_at) mesp_otel_gauge("matter.humidity", "%", m.humidity / 100.0, attrs);
-        if (light.on >= 0) mesp_otel_gauge("matter.onoff", "1", light.on, attrs);
-        if (light.level >= 0) mesp_otel_gauge("matter.brightness", "%", light.level * 100.0 / 254, attrs);
-        if (light.ct > 0) mesp_otel_gauge("matter.color_temperature", "K", 1e6 / light.ct, attrs);
+        if (state.on >= 0) mesp_otel_gauge("matter.onoff", "1", state.on, attrs);
+        if (state.level >= 0) mesp_otel_gauge("matter.brightness", "%", state.level * 100.0 / 254, attrs);
+        if (state.ct > 0) mesp_otel_gauge("matter.color_temperature", "K", 1e6 / state.ct, attrs);
     }
 }
 

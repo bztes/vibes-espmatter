@@ -1,4 +1,4 @@
-<!-- Create or edit a scene: its name, and for each light in it on or off, brightness and color temperature. -->
+<!-- Create or edit a scene: its name, and for each endpoint in it on or off, brightness and color temperature. -->
 <script lang="ts">
 	import { api, errorMessage, hexId } from '../../web-ui/device-ui/api';
 	import { Alert, Button, Checkbox, Dialog, Input, Slider, Switch } from '../../../device-ui/ui';
@@ -11,23 +11,23 @@
 		levelToPercent,
 		miredsToKelvin,
 		percentToLevel,
-		type LightChoice,
+		type EndpointChoice,
 		type Scene
 	} from './scenes';
 
 	let {
-		lights,
-		maxLights,
+		endpoints,
+		maxEndpoints,
 		onsaved
 	}: {
-		lights: LightChoice[];
-		maxLights: number;
+		endpoints: EndpointChoice[];
+		maxEndpoints: number;
 		onsaved: () => void;
 	} = $props();
 
 	const DEFAULT_CT = { min: 153, max: 500 };
 
-	/** How a light should be in the scene. */
+	/** How an endpoint should be in the scene. */
 	interface Row {
 		on: boolean;
 		percent: number;
@@ -37,22 +37,22 @@
 	let dialog = $state<ReturnType<typeof Dialog>>();
 	let editing = $state<Scene | null>(null);
 	let name = $state('');
-	/** The lights in the scene, by key; lights left out keep their row in case they come back. */
+	/** The endpoints in the scene, by key; endpoints left out keep their row in case they come back. */
 	let rows = $state<Record<string, Row>>({});
 	let selected = $state<string[]>([]);
-	/** Lights of the scene being edited that aren't offered here (no longer controllable): dropped on save. */
+	/** Endpoints of the scene being edited that aren't offered here (no longer controllable): dropped on save. */
 	let dropped = $state(0);
 	let error = $state('');
 	let busy = $state(false);
 
-	const dimmable = (l: LightChoice) => DIMMABLE_TYPES.includes(l.endpoint.deviceType);
-	const hasCt = (l: LightChoice) => COLOR_TEMPERATURE_TYPES.includes(l.endpoint.deviceType);
+	const dimmable = (l: EndpointChoice) => DIMMABLE_TYPES.includes(l.endpoint.deviceType);
+	const hasCt = (l: EndpointChoice) => COLOR_TEMPERATURE_TYPES.includes(l.endpoint.deviceType);
 	// Warm = many mireds = few kelvin.
-	const kMin = (l: LightChoice) => miredsToKelvin(l.endpoint.ctMaxMireds ?? DEFAULT_CT.max);
-	const kMax = (l: LightChoice) => miredsToKelvin(l.endpoint.ctMinMireds ?? DEFAULT_CT.min);
+	const kMin = (l: EndpointChoice) => miredsToKelvin(l.endpoint.ctMaxMireds ?? DEFAULT_CT.max);
+	const kMax = (l: EndpointChoice) => miredsToKelvin(l.endpoint.ctMinMireds ?? DEFAULT_CT.min);
 
-	/** The light as it is now (as far as the hub knows). */
-	const current = (l: LightChoice): Row => ({
+	/** The endpoint as it is now (as far as the hub knows). */
+	const current = (l: EndpointChoice): Row => ({
 		on: l.endpoint.on ?? true,
 		percent: l.endpoint.level ? levelToPercent(l.endpoint.level) : 100,
 		kelvin: l.endpoint.ctMireds ? miredsToKelvin(l.endpoint.ctMireds) : 2700
@@ -63,10 +63,10 @@
 		editing = scene ?? null;
 		error = '';
 		name = scene?.name ?? '';
-		rows = Object.fromEntries(lights.map((l) => [l.key, current(l)]));
+		rows = Object.fromEntries(endpoints.map((l) => [l.key, current(l)]));
 		selected = [];
 		dropped = 0;
-		for (const sl of scene?.lights ?? []) {
+		for (const sl of scene?.endpoints ?? []) {
 			const key = `${sl.node}:${sl.endpoint}`;
 			const row = rows[key];
 			if (!row) {
@@ -85,16 +85,16 @@
 		selected = on ? [...selected, key] : selected.filter((k) => k !== key);
 	}
 
-	/** All lights that are on now, as they are. */
+	/** All endpoints that are on now, as they are. */
 	function takeCurrent() {
-		const on = lights.filter((l) => l.endpoint.on).slice(0, maxLights);
+		const on = endpoints.filter((l) => l.endpoint.on).slice(0, maxEndpoints);
 		for (const l of on) rows[l.key] = current(l);
 		selected = on.map((l) => l.key);
 	}
 
 	async function save(ev: SubmitEvent) {
 		ev.preventDefault();
-		const list = lights
+		const list = endpoints
 			.filter((l) => selected.includes(l.key))
 			.map((l) => {
 				const row = rows[l.key];
@@ -110,7 +110,7 @@
 					op: editing ? 'set' : 'add',
 					id: editing?.id,
 					name: name.trim(),
-					lights: list.join(',')
+					endpoints: list.join(',')
 				}
 			});
 			dialog?.close();
@@ -137,18 +137,18 @@
 		/>
 
 		<div class="flex items-center justify-between text-sm">
-			<span class="text-muted">Lights ({selected.length}/{maxLights})</span>
-			<Button variant="link" onclick={takeCurrent}>Lights that are on now</Button>
+			<span class="text-muted">Lights and plugs ({selected.length}/{maxEndpoints})</span>
+			<Button variant="link" onclick={takeCurrent}>All that are on now</Button>
 		</div>
 		<ul class="m-0 grid max-h-[50vh] list-none overflow-y-auto p-0">
-			{#each lights as l (l.key)}
+			{#each endpoints as l (l.key)}
 				{@const row = rows[l.key]}
 				{@const inScene = selected.includes(l.key)}
 				<li class="grid gap-1.5 border-t py-2">
 					<div class="flex items-center justify-between gap-2">
 						<Checkbox
 							checked={inScene}
-							disabled={!inScene && selected.length >= maxLights}
+							disabled={!inScene && selected.length >= maxEndpoints}
 							onchange={(e) => toggle(l.key, e.currentTarget.checked)}>{l.name}</Checkbox
 						>
 						{#if inScene && row}
@@ -189,7 +189,7 @@
 		</ul>
 		{#if dropped}
 			<p class="m-0 text-xs text-muted">
-				{dropped} light{dropped === 1 ? '' : 's'} of this scene you can't control any more will be removed
+				{dropped} device{dropped === 1 ? '' : 's'} of this scene you can't control any more will be removed
 				from it.
 			</p>
 		{/if}

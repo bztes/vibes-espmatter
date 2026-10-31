@@ -1,6 +1,6 @@
 <!--
-	Admin dashboard: the lights and sensors each user (not admin) sees on the user dashboard, and
-	whether they may control a light or only view it (espm_matter_access.cpp). Admins see and
+	Admin dashboard: the endpoints (lights, plugs, sensors) each user (not admin) sees on the user
+	dashboard, and whether they may control a light or plug or only view it (espm_matter_access.cpp). Admins see and
 	control all of them anyway.
 -->
 <script lang="ts">
@@ -9,25 +9,25 @@
 	import { live } from '../../web-ui/device-ui/live.svelte';
 	import Panel from '../../web-ui/device-ui/Panel.svelte';
 	import { Alert, Button, Chip } from '../../../device-ui/ui';
-	import { LIGHT_TYPES, SENSOR_TYPES, endpointName, matterNodes, nodeName } from './matter';
+	import { SWITCHABLE_TYPES, SENSOR_TYPES, endpointName, matterNodes, nodeName } from './matter';
 
-	type Light = { node: number; endpoint: number; readOnly?: boolean };
+	type Granted = { node: number; endpoint: number; readOnly?: boolean };
 	type Level = 'control' | 'view';
 	/** Endpoint key ("node:endpoint") → what the user may do with it; missing: not shown to them. */
 	type Selection = Record<string, Level>;
 
 	const users = live<{ users: { name: string; role: 'admin' | 'user' }[] }>('/api/users', 60_000);
-	const access = live<{ max: number; users: Record<string, Light[]> }>(
+	const access = live<{ max: number; users: Record<string, Granted[]> }>(
 		'/api/matter/access',
 		60_000
 	);
 	const nodes = matterNodes();
 
 	/**
-	 * One choice per light, and one per sensor device covering all of its sensor endpoints. Sensors
+	 * One choice per light or plug, and one per sensor device covering all of its sensor endpoints. Sensors
 	 * have nothing to control: they are only shown or not.
 	 */
-	const lights = $derived(
+	const choices = $derived(
 		(nodes.data?.nodes ?? [])
 			.flatMap((node) => {
 				const sensorKeys = node.endpoints
@@ -35,7 +35,7 @@
 					.map((ep) => `${node.id}:${ep.id}`);
 				return [
 					...node.endpoints
-						.filter((ep) => LIGHT_TYPES.includes(ep.deviceType))
+						.filter((ep) => SWITCHABLE_TYPES.includes(ep.deviceType))
 						.map((ep) => ({
 							key: `${node.id}:${ep.id}`,
 							keys: [`${node.id}:${ep.id}`],
@@ -74,8 +74,8 @@
 	const levelOf = (sel: Selection, keys: string[]): Level | undefined =>
 		keys.every((k) => sel[k]) ? sel[keys[0]] : undefined;
 
-	/** Lights: off → control → view only → off. Sensors: off ↔ shown. */
-	function next(sel: Selection, l: (typeof lights)[number]): Selection {
+	/** Lights and plugs: off → control → view only → off. Sensors: off ↔ shown. */
+	function next(sel: Selection, l: (typeof choices)[number]): Selection {
 		const level = levelOf(sel, l.keys);
 		const to: Level | undefined = !level
 			? 'control'
@@ -100,7 +100,7 @@
 				.join(',');
 		try {
 			await api('/api/matter/access', {
-				body: { user, lights: keys('control'), view: keys('view') }
+				body: { user, control: keys('control'), view: keys('view') }
 			});
 			await access.refresh();
 			delete edits[user];
@@ -115,31 +115,31 @@
 <Panel title="Dashboard access">
 	{#if members.length === 0}
 		<p class="text-muted">
-			No users yet – admins see every light and sensor. Add a user with the role “User” to give them
-			some.
+			No users yet – admins see every light, plug and sensor. Add a user with the role “User” to
+			give them some.
 		</p>
-	{:else if lights.length === 0}
-		<p class="text-muted">No lights or sensors paired yet.</p>
+	{:else if choices.length === 0}
+		<p class="text-muted">No lights, plugs or sensors paired yet.</p>
 	{:else}
 		<p class="text-sm text-muted">
-			Tap a light once to let the user control it, a second time to let them only view it (<Eye
+			Tap a light or plug once to let the user control it, a second time to let them only view it (<Eye
 				size={13}
 				class="inline align-[-2px]"
 			/>).
 		</p>
 	{/if}
-	{#each lights.length ? members : [] as user (user.name)}
+	{#each choices.length ? members : [] as user (user.name)}
 		{@const saved = selectionOf(user.name)}
 		{@const selected = edits[user.name] ?? saved}
-		{@const count = lights.filter((l) => levelOf(saved, l.keys)).length}
+		{@const count = choices.filter((l) => levelOf(saved, l.keys)).length}
 		<div class="grid gap-2 border-t py-3">
 			<div class="flex flex-wrap items-center gap-2">
 				<strong>{user.name}</strong>
 				<span class="text-muted">· {count} device{count === 1 ? '' : 's'}</span>
 			</div>
-			<!-- The saved ones first – by the saved selection, so a light doesn't jump when clicked. -->
+			<!-- The saved ones first – by the saved selection, so a chip doesn't jump when clicked. -->
 			<div class="flex flex-wrap gap-1.5">
-				{#each [...lights.filter( (l) => levelOf(saved, l.keys) ), ...lights.filter((l) => !levelOf(saved, l.keys))] as l (l.key)}
+				{#each [...choices.filter( (l) => levelOf(saved, l.keys) ), ...choices.filter((l) => !levelOf(saved, l.keys))] as l (l.key)}
 					{@const level = levelOf(selected, l.keys)}
 					<Chip
 						pressed={!!level}

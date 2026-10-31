@@ -1,8 +1,8 @@
 // Timers (espm_timers.cpp): types and formatting shared by the panel and dialog.
 import type { MatterEndpoint } from '../../matter-controller/device-ui/matter';
 
-/** A light a timer can control (one endpoint of a node). */
-export interface LightChoice {
+/** A light or plug a timer can control (one endpoint of a node). */
+export interface EndpointChoice {
 	key: string;
 	node: number;
 	name: string;

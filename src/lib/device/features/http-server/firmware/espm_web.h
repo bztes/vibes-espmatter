@@ -20,7 +20,7 @@ esp_err_t mesp_web_start();
 
 /**
  * Who may do what. Admins may do everything; users only what a route allows them (with
- * `mesp_web_require(req, MESP_ROLE_USER)`), e.g. the lights the Matter controller gives them.
+ * `mesp_web_require(req, MESP_ROLE_USER)`), e.g. the endpoints the Matter controller gives them.
  */
 enum mesp_role_t : uint8_t { MESP_ROLE_NONE = 0, MESP_ROLE_USER = 1, MESP_ROLE_ADMIN = 2 };
 

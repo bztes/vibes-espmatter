@@ -42,8 +42,8 @@ int64_t matter_nodes::s_last_seen[MESP_MAX_NODES]; // runtime only, esp_timer µ
 /** Connection lost (mesp_matter_node_lost()) and no report since: its values aren't current. Runtime only. */
 static bool s_offline[MESP_MAX_NODES];
 
-/** Last known light state per endpoint (runtime only). Filled by read_node_state(). */
-mesp_light_t matter_nodes::s_light[MESP_MAX_NODES][MESP_MAX_EPS];
+/** Last known on/off, brightness and color temperature per endpoint (runtime only). Filled by read_node_state(). */
+mesp_endpoint_state_t matter_nodes::s_state[MESP_MAX_NODES][MESP_MAX_EPS];
 
 /** Last reported sensor values per endpoint (runtime only). Mostly from subscriptions (espm_subscriptions.cpp). */
 mesp_measure_t matter_nodes::s_measure[MESP_MAX_NODES][MESP_MAX_EPS];
@@ -120,10 +120,10 @@ static int ep_slot(int idx, chip::EndpointId ep)
     return -1;
 }
 
-static mesp_light_t *light_state(int idx, chip::EndpointId ep)
+static mesp_endpoint_state_t *state_of(int idx, chip::EndpointId ep)
 {
     int slot = ep_slot(idx, ep);
-    return slot < 0 ? nullptr : &s_light[idx][slot];
+    return slot < 0 ? nullptr : &s_state[idx][slot];
 }
 
 /**
@@ -135,7 +135,7 @@ void matter_nodes::notify_values(int idx, bool current)
     if (current && s_offline[idx]) return;
     const mesp_node_t &node = s_nodes[idx];
     mesp_node_values v = {node.node_id, node.name, &s_battery[idx], &s_power[idx],
-                          node.ep_count, node.ep,   s_measure[idx], s_light[idx]};
+                          node.ep_count, node.ep,   s_measure[idx], s_state[idx]};
     for (auto cb : s_values_listeners)
         if (cb) cb(v, current);
 }
@@ -218,24 +218,24 @@ static void store_attribute(int idx, const ConcreteDataAttributePath &path, chip
     }
 
     if (path.mClusterId == OnOff::Id || path.mClusterId == LevelControl::Id || path.mClusterId == ColorControl::Id) {
-        mesp_light_t *light = light_state(idx, path.mEndpointId);
-        if (!light) return;
+        mesp_endpoint_state_t *state = state_of(idx, path.mEndpointId);
+        if (!state) return;
         if (path.mClusterId == OnOff::Id && path.mAttributeId == OnOff::Attributes::OnOff::Id) {
             bool on;
-            if (chip::app::DataModel::Decode(reader, on) == CHIP_NO_ERROR) light->on = on;
+            if (chip::app::DataModel::Decode(reader, on) == CHIP_NO_ERROR) state->on = on;
         } else if (path.mClusterId == LevelControl::Id &&
                    path.mAttributeId == LevelControl::Attributes::CurrentLevel::Id) {
             chip::app::DataModel::Nullable<uint8_t> level;
             if (chip::app::DataModel::Decode(reader, level) == CHIP_NO_ERROR && !level.IsNull()) {
-                light->level = level.Value();
+                state->level = level.Value();
             }
         } else if (path.mClusterId == ColorControl::Id) {
             uint16_t v;
             if (chip::app::DataModel::Decode(reader, v) != CHIP_NO_ERROR) return;
             switch (path.mAttributeId) {
-            case ColorControl::Attributes::ColorTemperatureMireds::Id: light->ct = v; break;
-            case ColorControl::Attributes::ColorTempPhysicalMinMireds::Id: light->ct_min = v; break;
-            case ColorControl::Attributes::ColorTempPhysicalMaxMireds::Id: light->ct_max = v; break;
+            case ColorControl::Attributes::ColorTemperatureMireds::Id: state->ct = v; break;
+            case ColorControl::Attributes::ColorTempPhysicalMinMireds::Id: state->ct_min = v; break;
+            case ColorControl::Attributes::ColorTempPhysicalMaxMireds::Id: state->ct_max = v; break;
             default: break;
             }
         }
@@ -477,7 +477,7 @@ static void on_commissioning_success(chip::ScopedNodeId peer)
             s_tags[s_node_count][0] = '\0';
             s_last_seen[s_node_count] = esp_timer_get_time();
             s_offline[s_node_count] = false;
-            memset(s_light[s_node_count], 0xff, sizeof(s_light[s_node_count]));
+            memset(s_state[s_node_count], 0xff, sizeof(s_state[s_node_count]));
             memset(s_measure[s_node_count], 0, sizeof(s_measure[s_node_count]));
             memset(s_switch_features[s_node_count], 0, sizeof(s_switch_features[s_node_count]));
             s_battery[s_node_count] = {-1, -1, 0};
@@ -609,7 +609,7 @@ size_t mesp_matter_endpoints(mesp_endpoint_ref *out, size_t max)
 void mesp_matter_init()
 {
     s_mutex = xSemaphoreCreateRecursiveMutex();
-    memset(s_light, 0xff, sizeof(s_light)); // all unknown (-1)
+    memset(s_state, 0xff, sizeof(s_state)); // all unknown (-1)
     for (auto &bat : s_battery) bat = {-1, -1, 0};
     nodes_load();
 }
@@ -668,7 +668,7 @@ void matter_nodes::node_remove(int idx)
         s_nodes[i] = s_nodes[i + 1];
         s_last_seen[i] = s_last_seen[i + 1];
         s_offline[i] = s_offline[i + 1];
-        memcpy(s_light[i], s_light[i + 1], sizeof(s_light[i]));
+        memcpy(s_state[i], s_state[i + 1], sizeof(s_state[i]));
         memcpy(s_measure[i], s_measure[i + 1], sizeof(s_measure[i]));
         memcpy(s_switch_features[i], s_switch_features[i + 1], sizeof(s_switch_features[i]));
         s_battery[i] = s_battery[i + 1];

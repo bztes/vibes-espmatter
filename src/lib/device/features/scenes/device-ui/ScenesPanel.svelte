@@ -1,6 +1,7 @@
 <!--
-	Scenes on the dashboard (espm_scenes.cpp): one tile per scene, tap to switch its lights. Everyone
-	sees their own scenes and those an admin shared with them; only the owner edits or deletes one.
+	Scenes on the dashboard (espm_scenes.cpp): one tile per scene, tap to switch its lights and
+	plugs. Everyone sees their own scenes and those an admin shared with them; only the owner edits
+	or deletes one.
 -->
 <script lang="ts">
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -14,18 +15,22 @@
 	import Menu from '../../../device-ui/Menu.svelte';
 	import Panel from '../../web-ui/device-ui/Panel.svelte';
 	import { Alert, Button, showConfirm } from '../../../device-ui/ui';
-	import { LIGHT_TYPES, endpointName, matterNodes } from '../../matter-controller/device-ui/matter';
+	import {
+		SWITCHABLE_TYPES,
+		endpointName,
+		matterNodes
+	} from '../../matter-controller/device-ui/matter';
 	import SceneDialog from './SceneDialog.svelte';
-	import { summary, type LightChoice, type Scene, type ScenesResponse } from './scenes';
+	import { summary, type EndpointChoice, type Scene, type ScenesResponse } from './scenes';
 
 	const scenes = live<ScenesResponse>('/api/scenes', 30_000);
 	const nodes = matterNodes();
 
-	const lights = $derived<LightChoice[]>(
+	const endpoints = $derived<EndpointChoice[]>(
 		(nodes.data?.nodes ?? [])
 			.flatMap((node) =>
 				node.endpoints
-					.filter((ep) => LIGHT_TYPES.includes(ep.deviceType) && !ep.readOnly)
+					.filter((ep) => SWITCHABLE_TYPES.includes(ep.deviceType) && !ep.readOnly)
 					.map((endpoint) => ({
 						key: `${node.id}:${endpoint.id}`,
 						node: node.id,
@@ -65,7 +70,7 @@
 			setTimeout(() => {
 				if (ran === s.id) ran = undefined;
 			}, 1500);
-			// The tiles show the new state once the lights report it.
+			// The tiles show the new state once the endpoints report it.
 			setTimeout(() => nodes.refresh(), 1500);
 		} catch (e) {
 			error = errorMessage(e);
@@ -92,7 +97,7 @@
 
 <Panel title="Scenes">
 	{#snippet badge()}
-		{#if lights.length && scenes.data && scenes.data.count < scenes.data.max}
+		{#if endpoints.length && scenes.data && scenes.data.count < scenes.data.max}
 			<Button onclick={() => dialog?.open()}><Plus size={15} /> New scene</Button>
 		{/if}
 	{/snippet}
@@ -101,7 +106,7 @@
 		<p class="text-muted">{scenes.error ?? 'Loading…'}</p>
 	{:else if shown.length === 0}
 		<p class="text-muted">
-			{lights.length ? 'No scenes yet.' : 'No lights you could make a scene of.'}
+			{endpoints.length ? 'No scenes yet.' : 'No lights or plugs you could make a scene of.'}
 		</p>
 	{:else}
 		<div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
@@ -111,7 +116,7 @@
 						type="button"
 						class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-[10px] border-0 bg-transparent p-3 text-left disabled:cursor-default"
 						disabled={running !== undefined}
-						title="Switch the lights of this scene"
+						title="Switch the lights and plugs of this scene"
 						onclick={() => run(s)}
 					>
 						<span
@@ -153,7 +158,7 @@
 
 <SceneDialog
 	bind:this={dialog}
-	{lights}
-	maxLights={scenes.data?.maxLights ?? 12}
+	{endpoints}
+	maxEndpoints={scenes.data?.maxEndpoints ?? 12}
 	onsaved={scenes.refresh}
 />

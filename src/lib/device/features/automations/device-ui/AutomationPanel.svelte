@@ -1,5 +1,6 @@
 <!--
-	Rules that let buttons of Matter switches control lights through the hub (espm_automation.cpp).
+	Rules that let buttons of Matter switches control lights and plugs through the hub
+	(espm_automation.cpp).
 	The buttons come from the Matter controller's node list.
 -->
 <script lang="ts">
@@ -12,7 +13,7 @@
 		COLOR_TEMPERATURE_TYPES,
 		DIMMABLE_TYPES,
 		GENERIC_SWITCH,
-		LIGHT_TYPES,
+		SWITCHABLE_TYPES,
 		endpointName,
 		matterNodes,
 		type MatterNode
@@ -35,7 +36,7 @@
 		double: 'is double-pressed',
 		hold: 'is held'
 	};
-	/** `needs`: what the light must support; `hold`: only while the button is held. */
+	/** `needs`: what the endpoint must support; `hold`: only while the button is held. */
 	const ACTIONS: { id: string; label: string; needs?: 'level' | 'ct'; hold?: boolean }[] = [
 		{ id: 'toggle', label: 'Toggle on/off' },
 		{ id: 'on', label: 'Turn on' },
@@ -54,14 +55,14 @@
 	const nodes = matterNodes();
 	const automations = live<{ rules: Rule[] }>('/api/automations');
 
-	const endpoints = (types: number[]) =>
+	const endpointsOf = (types: number[]) =>
 		(nodes.data?.nodes ?? []).flatMap((node) =>
 			node.endpoints
 				.filter((e) => types.includes(e.deviceType))
 				.map((ep) => ({ node, ep, key: `${node.id}:${ep.id}` }))
 		);
-	const buttons = $derived(endpoints([GENERIC_SWITCH]));
-	const lights = $derived(endpoints(LIGHT_TYPES));
+	const buttons = $derived(endpointsOf([GENERIC_SWITCH]));
+	const targets = $derived(endpointsOf(SWITCHABLE_TYPES));
 
 	function label(nodeId: number, epId: number, kind: string) {
 		const node = nodes.data?.nodes.find((n: MatterNode) => n.id === nodeId);
@@ -71,12 +72,12 @@
 
 	let button = $state('');
 	let trigger = $state<Trigger>('press');
-	let light = $state('');
+	let targetKey = $state('');
 	let picked = $state('toggle');
 	let error = $state('');
 	let busy = $state(false);
 
-	const target = $derived(lights.find((l) => l.key === light)?.ep);
+	const target = $derived(targets.find((l) => l.key === targetKey)?.ep);
 	const available = $derived(
 		ACTIONS.filter(
 			(a) =>
@@ -88,7 +89,7 @@
 					))
 		)
 	);
-	/** The picked action, or the first one available when trigger or light rule it out. */
+	/** The picked action, or the first one available when trigger or endpoint rule it out. */
 	const action = $derived(
 		available.some((a) => a.id === picked) ? picked : (available[0]?.id ?? 'toggle')
 	);
@@ -100,7 +101,7 @@
 	async function add(ev: SubmitEvent) {
 		ev.preventDefault();
 		const [src, srcEndpoint] = button.split(':');
-		const [dst, dstEndpoint] = light.split(':');
+		const [dst, dstEndpoint] = targetKey.split(':');
 		busy = true;
 		error = '';
 		try {
@@ -171,9 +172,9 @@
 					<option value={id} disabled={id === 'double' && doubleUnsupported}>{text}</option>
 				{/each}
 			</Select>
-			<Select label="then" bind:value={light} required>
-				<option value="" disabled>Light…</option>
-				{#each lights as l (l.key)}
+			<Select label="then" bind:value={targetKey} required>
+				<option value="" disabled>Light or plug…</option>
+				{#each targets as l (l.key)}
 					<option value={l.key}>{endpointName(l.node, l.ep, 'light')}</option>
 				{/each}
 			</Select>
@@ -182,7 +183,9 @@
 					<option value={a.id}>{a.label}</option>
 				{/each}
 			</Select>
-			<Button type="submit" variant="primary" disabled={busy || !button || !light}>Add rule</Button>
+			<Button type="submit" variant="primary" disabled={busy || !button || !targetKey}
+				>Add rule</Button
+			>
 		</form>
 		{#if error}<Alert>{error}</Alert>{/if}
 	{/if}

@@ -31,7 +31,7 @@ struct mesp_node_t {
 extern mesp_node_t s_nodes[MESP_MAX_NODES];
 extern char s_tags[MESP_MAX_NODES][64];
 extern int64_t s_last_seen[MESP_MAX_NODES];
-extern mesp_light_t s_light[MESP_MAX_NODES][MESP_MAX_EPS];
+extern mesp_endpoint_state_t s_state[MESP_MAX_NODES][MESP_MAX_EPS];
 extern mesp_measure_t s_measure[MESP_MAX_NODES][MESP_MAX_EPS];
 extern uint32_t s_switch_features[MESP_MAX_NODES][MESP_MAX_EPS];
 extern mesp_battery_t s_battery[MESP_MAX_NODES];

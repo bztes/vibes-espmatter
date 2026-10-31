@@ -7,7 +7,7 @@ export const api: DeviceApiRoute[] = [
 		path: '/api/timers',
 		summary: 'Timers and the device clock',
 		description:
-			'Everyone gets the timers of the lights they may control. `minute`: minutes after midnight, local time; `days`: bit 0 = Sunday … bit 6 = Saturday, 0 = once (then `remaining` seconds). `level` and `startLevel` 0–254, `mireds` 0 = unchanged, `fade` in seconds.',
+			'Everyone gets the timers of the endpoints they may control. `minute`: minutes after midnight, local time; `days`: bit 0 = Sunday … bit 6 = Saturday, 0 = once (then `remaining` seconds). `level` and `startLevel` 0–254, `mireds` 0 = unchanged, `fade` in seconds.',
 		access: 'user',
 		response: {
 			clock: { synced: true, tz: 'Europe/Berlin', minute: 1260, weekday: 3 },
@@ -47,8 +47,8 @@ export const api: DeviceApiRoute[] = [
 				required: true
 			},
 			{ name: 'id', type: 'number', description: '`set`, `delete`, `run`: the timer' },
-			{ name: 'node', type: 'number', description: 'Node of the light' },
-			{ name: 'endpoint', type: 'number', description: 'Endpoint of the light' },
+			{ name: 'node', type: 'number', description: 'Node of the endpoint' },
+			{ name: 'endpoint', type: 'number', description: 'Endpoint (light or plug)' },
 			{ name: 'name', type: 'string', description: 'Name; `timezone`: e.g. `Europe/Berlin`' },
 			{ name: 'enabled', type: 'boolean', description: '`true` or `false`' },
 			{ name: 'minute', type: 'number', description: 'Time of day: minutes after midnight' },

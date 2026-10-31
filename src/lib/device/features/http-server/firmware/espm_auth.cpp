@@ -44,7 +44,7 @@ static const char *TAG = "mesp_auth";
 
 #define FLAG_MUST_CHANGE 0x01
 
-// Layout is stored in NVS as is – only append, never reorder. The lights a user may use are the
+// Layout is stored in NVS as is – only append, never reorder. The endpoints a user may use are the
 // Matter controller's (espm_matter_access.cpp).
 struct user_t {
     char name[24];

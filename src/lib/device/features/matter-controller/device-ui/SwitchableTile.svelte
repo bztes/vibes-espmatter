@@ -42,7 +42,7 @@
 	const ctMax = $derived(endpoint.ctMaxMireds ?? DEFAULT_CT.max);
 	const kelvin = (mireds: number) => Math.round(1_000_000 / mireds / 50) * 50;
 
-	// Optimistic state: shown right away, replaced by what the light reports.
+	// Optimistic state: shown right away, replaced by what the endpoint reports.
 	let pendingOn = $state<boolean>();
 	const on = $derived(pendingOn ?? endpoint.on ?? false);
 	const level = $derived(endpoint.level ?? 254);

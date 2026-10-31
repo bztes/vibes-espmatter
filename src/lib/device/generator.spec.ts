@@ -243,7 +243,7 @@ describe('generator', () => {
 		expect(host.ui.flatMap((u) => u.panels).filter((p) => /dashboard\//.test(p.module))).toEqual(
 			[]
 		);
-		// which lights each user gets is the Matter controller's, shown on the admin dashboard
+		// which endpoints each user gets is the Matter controller's, shown on the admin dashboard
 		expect(admin.panels.map((p) => p.id)).toContain('access');
 		expect(host.files['main/CMakeLists.txt']).toContain('"espm_matter_access.cpp"');
 		// the user dashboard is its own page with the controller's tiles and the timers

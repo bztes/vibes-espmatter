@@ -108,7 +108,7 @@ static esp_err_t nodes_handler(httpd_req_t *req)
             for (uint8_t e = 0; e < n.ep_count; e++) {
                 mesp_access_t access = access_of(session, n.node_id, n.ep[e]);
                 if (access == MESP_ACCESS_NONE) continue;
-                const mesp_light_t &l = s_light[i][e];
+                const mesp_endpoint_state_t &l = s_state[i][e];
                 j.obj().key("id").num(n.ep[e]).key("deviceType").num(n.device_type[e]);
                 if (access == MESP_ACCESS_VIEW) j.key("readOnly").boolean(true);
                 if (l.on >= 0) j.key("on").boolean(l.on);
@@ -191,7 +191,7 @@ static esp_err_t node_action_handler(httpd_req_t *req)
     }
     if (idx < 0) return mesp_web_send_error(req, "404 Not Found", "unknown node");
 
-    // Dashboard users may read the state of the lights they see and switch, dim or tint those they
+    // Dashboard users may read the state of the endpoints they see and switch, dim or tint those they
     // control – nothing else.
     if (session.role != MESP_ROLE_ADMIN) {
         std::string ep_str, cluster_str;

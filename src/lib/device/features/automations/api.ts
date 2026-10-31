@@ -7,7 +7,7 @@ export const api: DeviceApiRoute[] = [
 		path: '/api/automations',
 		summary: 'Button rules',
 		description:
-			'What a button press (`src…`) does to a light (`dst…`). `id`: position in the list.',
+			'What a button press (`src…`) does to an endpoint, a light or plug (`dst…`). `id`: position in the list.',
 		access: 'admin',
 		response: {
 			rules: [
@@ -36,8 +36,12 @@ export const api: DeviceApiRoute[] = [
 			{ name: 'id', type: 'number', description: '`delete`: the rule' },
 			{ name: 'src', type: 'number', description: '`add`: node of the button' },
 			{ name: 'srcEndpoint', type: 'number', description: '`add`: endpoint of the button' },
-			{ name: 'dst', type: 'number', description: '`add`: node of the light' },
-			{ name: 'dstEndpoint', type: 'number', description: '`add`: endpoint of the light' },
+			{ name: 'dst', type: 'number', description: '`add`: node of the endpoint to control' },
+			{
+				name: 'dstEndpoint',
+				type: 'number',
+				description: '`add`: endpoint to control (light or plug)'
+			},
 			{ name: 'trigger', type: 'string', description: '`press`, `double` or `hold`' },
 			{
 				name: 'action',
