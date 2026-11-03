@@ -270,10 +270,22 @@ export interface GenerateContext<C extends FeatureConfig = FeatureConfig> {
 	chipName(roleId: string): string;
 }
 
+/** What only a server build knows, e.g. for updates over Matter. */
+export interface BuildInfo {
+	/** Software version: build time in seconds since 1970, so newer builds have higher ones. */
+	version: number;
+	/** The saved device the build is of; none for anonymous builds. */
+	projectId?: string;
+	/** Where hubs fetch updates of their devices: this server, and their access token. */
+	updateServer?: { url: string; token: string };
+}
+
 /** What `FeatureDef.activate` gets: the context plus the chip's services. */
 export interface ActivateContext<
 	C extends FeatureConfig = FeatureConfig
 > extends GenerateContext<C> {
+	/** Set by the build server only: not part of the config or its hashes. */
+	build?: BuildInfo;
 	/** A service of the chip; throws when the feature that brings it isn't on the chip. */
 	use<T>(key: ServiceKey<T>): T;
 	/** A service of the chip, if the feature that brings it is on the chip. */

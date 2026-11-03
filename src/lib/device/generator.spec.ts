@@ -9,11 +9,13 @@ import {
 	defaultProject,
 	featuresDroppedBy,
 	generateProject,
+	generateRole,
 	newChip,
 	externalParts,
 	normalizeProject,
 	generatedHash,
 	projectHash,
+	requiredFeatures,
 	requiredBy,
 	validateProject,
 	wiring
@@ -478,6 +480,55 @@ describe('panasonic heat pump', () => {
 		addFeature(chip(project, 'host'), 'matter_device');
 		expect(validateProject(project).map((i) => i.message)).toContain(
 			'A board is either a Matter device or a Matter controller (hub), not both.'
+		);
+	});
+});
+
+describe('updates over Matter', () => {
+	const build = {
+		version: 1793700000,
+		projectId: '0b6c2f1e-8a1d-4c55-9a43-3f1c1d2e4a5b',
+		updateServer: { url: 'https://espmatter.example.com', token: 'hub.token' }
+	};
+
+	it('compiles the version and UniqueID of a server build into the device', () => {
+		const project = defaultProject('panasonic-heat-pump-thread', 'Bedroom');
+		const main = generateRole(project, 'main', build);
+		const sdk = main.files['sdkconfig.defaults'];
+		expect(sdk).toContain('CONFIG_ENABLE_OTA_REQUESTOR=y');
+		expect(sdk).toContain('CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER=1793700000');
+		expect(main.files['main/espm_config.h']).toMatch(/#define MESP_UPDATE_ID "[0-9a-f]{16}"/);
+		expect(main.files['main/app_main.cpp']).toContain('StoreUniqueId(MESP_UPDATE_ID');
+		expect(main.files['CMakeLists.txt']).toContain('set(PROJECT_VER "2026-11-03 ');
+		expect(main.files['partitions.csv']).toContain('ota_1');
+	});
+
+	it('keeps build info out of the hashes', () => {
+		const project = defaultProject('panasonic-heat-pump-thread', 'Bedroom');
+		const plain = generateRole(project, 'main');
+		expect(plain.files['main/espm_config.h']).toContain('#define MESP_UPDATE_ID ""');
+		expect(generateRole(project, 'main', build).files['main/espm_config.h']).toContain(
+			`#define MESP_BUILD_ID "${projectHash(project)}"`
+		);
+	});
+
+	it('reaches the app through updates from the app, which need Wi-Fi', () => {
+		expect(requiredFeatures(features.get('matter_updates'))).toContain('app_updates');
+		expect(requiredFeatures(features.get('app_updates'))).toContain('wifi');
+	});
+
+	it('makes the hub the OTA provider, prefilled with this server', () => {
+		const host = generateRole(hubProject(), 'host', build);
+		expect(host.files['sdkconfig.defaults']).toContain(
+			'CONFIG_CHIP_DEVICE_ENABLE_DYNAMIC_SERVER=y'
+		);
+		const config = host.files['main/espm_config.h'];
+		expect(config).toContain('#define MESP_UPDATES_URL "https://espmatter.example.com"');
+		expect(config).toContain('#define MESP_UPDATES_TOKEN "hub.token"');
+		const app = host.files['main/app_main.cpp'];
+		// after the controller, whose provider it replaces (the first match is the declaration)
+		expect(app.indexOf('mesp_matter_start_controller();')).toBeLessThan(
+			app.lastIndexOf('mesp_matter_updates_start();')
 		);
 	});
 });

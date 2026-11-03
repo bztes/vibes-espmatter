@@ -79,3 +79,14 @@ export function indent(code: string, spaces = 4): string {
 		.map((line) => (line.trim() ? pad + line : line))
 		.join('\n');
 }
+
+/** A build's software version for people: its build time (UTC), e.g. `2026-11-03 10:23`. */
+export function versionString(version: number): string {
+	return new Date(version * 1000).toISOString().slice(0, 16).replace('T', ' ');
+}
+
+/**
+ * Which saved device and chip a firmware is of: the device's Matter UniqueID (`matter_ota`), so a
+ * hub can ask the server for newer builds of it (`server/updates.ts`).
+ */
+export const updateId = (projectId: string, roleId: string) => hash(`${projectId}/${roleId}`);

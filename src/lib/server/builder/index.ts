@@ -11,7 +11,7 @@ import { createWriteStream, existsSync, type WriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import { DATA_DIR } from '$app/env/private';
+import { DATA_DIR, ORIGIN } from '$app/env/private';
 import { errorMessage } from '#lib/errors.ts';
 import { db } from '#lib/server/db/index.ts';
 import { build, worker as workerTable, type Worker } from '#lib/server/db/schema.ts';
@@ -24,7 +24,8 @@ import {
 	projectRoles,
 	validateProject
 } from '#lib/device/generator.ts';
-import type { ProjectConfig } from '#lib/device/types.ts';
+import type { BuildInfo, ProjectConfig } from '#lib/device/types.ts';
+import { buildVersion, updateToken } from '#lib/server/updates.ts';
 import { buildDeviceUi, DEVICE_UI_SOURCES_HASH } from '#lib/server/device-ui/index.ts';
 import { hash } from '#lib/device/util.ts';
 import {
@@ -102,6 +103,13 @@ export class NoWorkerError extends Error {
 	}
 }
 
+/** What a build of the saved device `projectId` compiles in besides its config. */
+function buildInfo(projectId: string | null | undefined, version: number): BuildInfo {
+	if (!projectId) return { version };
+	const url = ORIGIN.replace(/\/+$/, '');
+	return { version, projectId, updateServer: { url, token: updateToken(projectId) } };
+}
+
 export async function enqueueBuild(
 	input: ProjectConfig,
 	owner: { userId?: string | null; projectId?: string | null }
@@ -112,8 +120,10 @@ export async function enqueueBuild(
 	if (issues.length) throw new ConfigError(issues.map((i) => i.message));
 
 	// Covers the generated firmware and the device UI sources too: a changed firmware source must
-	// rebuild even when the config is the same.
-	const configHash = hash(`${generatedHash(config)}:${DEVICE_UI_SOURCES_HASH}`);
+	// rebuild even when the config is the same. With what the build compiles in, but its version.
+	const configHash = hash(
+		`${generatedHash(config, buildInfo(owner.projectId, 0))}:${DEVICE_UI_SOURCES_HASH}`
+	);
 
 	// Reuse an identical pending/running build, or a successful one whose files still exist.
 	const existing = await db
@@ -354,6 +364,7 @@ async function runBuild(id: string, worker: Worker) {
 	log(`Build worker: ${worker.name}`);
 	const config = normalizeProject(row.config);
 	const order = projectRoles(config);
+	const info = buildInfo(row.projectId, buildVersion(row.createdAt));
 	const cancelQueued = () => {
 		for (const r of order) if (roles[r.id].status === 'queued') roles[r.id].status = 'cancelled';
 	};
@@ -366,7 +377,7 @@ async function runBuild(id: string, worker: Worker) {
 		await save();
 		log(`\n━━━ ${config.name} · ${role.name} (${roles[role.id].target}) ━━━`);
 
-		const generated = generateRole(config, role.id);
+		const generated = generateRole(config, role.id, info);
 		const binaries: Record<string, Buffer> = {};
 		for (const spec of generated.ui) {
 			binaries[`main/${spec.page}.html.gz`] = await buildDeviceUi(

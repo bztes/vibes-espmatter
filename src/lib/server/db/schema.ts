@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import type { ProjectConfig } from '#lib/device/types.ts';
 import { user } from './auth.schema';
 import type { BuildStatus, RoleBuildState } from '#lib/build-types.ts';
@@ -57,6 +57,38 @@ export const build = sqliteTable(
 		...timestamps
 	},
 	(t) => [index('build_project_idx').on(t.projectId), index('build_hash_idx').on(t.configHash)]
+);
+
+export const DEVICE_UPDATE_STATES = [
+	'requested',
+	'downloading',
+	'installing',
+	'done',
+	'failed'
+] as const;
+export type DeviceUpdateState = (typeof DEVICE_UPDATE_STATES)[number];
+
+/**
+ * A build an owner wants on a chip of their device, and how far it got: the device (`app_updates`) or its
+ * hub (`matter_updates`) asks for it and reports back (see `server/updates.ts`). One per chip.
+ */
+export const deviceUpdate = sqliteTable(
+	'device_update',
+	{
+		projectId: text('project_id')
+			.notNull()
+			.references(() => project.id, { onDelete: 'cascade' }),
+		role: text('role').notNull(),
+		buildId: text('build_id')
+			.notNull()
+			.references(() => build.id, { onDelete: 'cascade' }),
+		/** Software version of the build (`BuildInfo.version`). */
+		version: integer('version').notNull(),
+		state: text('state').$type<DeviceUpdateState>().notNull().default('requested'),
+		message: text('message'),
+		...timestamps
+	},
+	(t) => [primaryKey({ columns: [t.projectId, t.role] })]
 );
 
 /** How a worker is reached, and what that needs (`worker.config`). */

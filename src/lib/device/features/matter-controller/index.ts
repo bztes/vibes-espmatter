@@ -51,7 +51,7 @@ const validate: Validate<MatterControllerConfig> = (ctx) => {
 			message: `Controller node ID must be between 1 and ${0xfffffff}.`
 		});
 	// its image (~2.6 MB) doesn't fit the app slots of 4 MB flash
-	if (ctx.has('ota') && flashMB(ctx) < 8)
+	if (ctx.features.some((f) => f.otaSlots) && flashMB(ctx) < 8)
 		errors.push('Over-the-air updates with the Matter controller need at least 8 MB flash.');
 	return errors;
 };

@@ -2,7 +2,7 @@ import type { TemplateDef } from '../types';
 
 /**
  * The Panasonic heat pump on Thread instead of Wi-Fi: an ESP32-H2 with its own 802.15.4 radio.
- * No web interface or over-the-air updates – those need Wi-Fi.
+ * No web interface (that needs Wi-Fi): updates come over Matter, from a hub with Matter updates.
  *
  * The chip id (`main`) is part of saved configurations and build artifacts – keep it.
  */
@@ -20,6 +20,7 @@ export default {
 			features: {
 				thread: {},
 				matter_device: {},
+				matter_ota: {},
 				panasonic_ac: {}
 			}
 		}

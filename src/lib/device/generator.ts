@@ -6,6 +6,7 @@ import { scoped, Services } from './services';
 import { firmware, parts, wires } from './features/core/services';
 import type {
 	DeviceApiRoute,
+	BuildInfo,
 	BoardDef,
 	ChipConfig,
 	FeatureConfig,
@@ -22,7 +23,15 @@ import type {
 	DevicePage,
 	Wire
 } from './types';
-import { cDefine, hash, indent, sdkconfigLine, slugify, stableStringify } from './util';
+import {
+	cDefine,
+	hash,
+	indent,
+	sdkconfigLine,
+	slugify,
+	stableStringify,
+	versionString
+} from './util';
 
 /** esp-matter version pulled from the Espressif component registry. */
 const ESP_MATTER_VERSION = '~1.5.1';
@@ -417,7 +426,10 @@ export function validateProject(project: ProjectConfig): Issue[] {
 function activateChip(
 	project: ProjectConfig,
 	chip: ChipConfig,
-	reached?: (feature: FeatureDef, other: string) => void
+	{
+		reached,
+		build
+	}: { reached?: (feature: FeatureDef, other: string) => void; build?: BuildInfo } = {}
 ): Services {
 	const enabled = chipFeatures(chip);
 	const ids = new Set(enabled.map((f) => f.id));
@@ -429,6 +441,7 @@ function activateChip(
 		const context = makeContext(project, chip, feature, () => services);
 		feature.activate?.({
 			...context,
+			build,
 			use: (key) => {
 				reach(key.feature);
 				return scoped(services.get(key), feature);
@@ -457,9 +470,11 @@ export function softDependencies(project: ProjectConfig): Map<string, Map<string
 	const result = new Map<string, Map<string, Set<string>>>();
 	for (const chip of project.chips) {
 		const soft = new Map<string, Set<string>>();
-		activateChip(project, chip, (feature, other) => {
-			if (requiredFeatures(feature).includes(other)) return;
-			soft.set(feature.id, (soft.get(feature.id) ?? new Set()).add(other));
+		activateChip(project, chip, {
+			reached: (feature, other) => {
+				if (requiredFeatures(feature).includes(other)) return;
+				soft.set(feature.id, (soft.get(feature.id) ?? new Set()).add(other));
+			}
 		});
 		result.set(chip.id, soft);
 	}
@@ -537,9 +552,9 @@ export function projectHash(project: ProjectConfig): string {
  * Identifies what a build compiles: the config plus every generated file of every role, so a
  * changed firmware source rebuilds even when the config is the same (unlike `projectHash`).
  */
-export function generatedHash(project: ProjectConfig): string {
+export function generatedHash(project: ProjectConfig, build?: BuildInfo): string {
 	project = normalizeProject(project);
-	const roles = generateProject(project).map((r) => ({ role: r.role.id, files: r.files }));
+	const roles = generateProject(project, build).map((r) => ({ role: r.role.id, files: r.files }));
 	return hash(stableStringify({ config: projectHash(project), roles }));
 }
 
@@ -721,7 +736,12 @@ function pushUnique(list: string[], items: string[] = []) {
 	for (const item of items) if (!list.includes(item)) list.push(item);
 }
 
-export function generateRole(project: ProjectConfig, roleId: string): GeneratedProject {
+/** `build`: what a server build adds (`BuildInfo`), not part of the hashes. */
+export function generateRole(
+	project: ProjectConfig,
+	roleId: string,
+	build?: BuildInfo
+): GeneratedProject {
 	project = normalizeProject(project);
 	const chip = getChip(project, roleId);
 	const role = chipRole(project, chip);
@@ -756,7 +776,7 @@ export function generateRole(project: ProjectConfig, roleId: string): GeneratedP
 		notes: []
 	};
 
-	const services = activateChip(project, chip);
+	const services = activateChip(project, chip, { build });
 	for (const { feature, item: generate } of services.get(firmware).entries()) {
 		const out = generate();
 		Object.assign(c.sdkconfig, out.sdkconfig);
@@ -796,7 +816,7 @@ export function generateRole(project: ProjectConfig, roleId: string): GeneratedP
 	files['CMakeLists.txt'] = `${header}
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "1.0.0")
+set(PROJECT_VER "${build ? versionString(build.version) : '1.0.0'}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
@@ -877,9 +897,9 @@ export function projectRoles(project: ProjectConfig): RoleDef[] {
 		.sort((a, b) => a.flashOrder - b.flashOrder);
 }
 
-export function generateProject(project: ProjectConfig): GeneratedProject[] {
+export function generateProject(project: ProjectConfig, build?: BuildInfo): GeneratedProject[] {
 	project = normalizeProject(project);
-	return projectRoles(project).map((r) => generateRole(project, r.id));
+	return projectRoles(project).map((r) => generateRole(project, r.id, build));
 }
 
 function readme(project: ProjectConfig, role: RoleDef, board: BoardDef, ui: boolean): string {

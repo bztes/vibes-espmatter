@@ -21,6 +21,7 @@ export default {
 				wifi: {},
 				http_server: {},
 				ota: {},
+				app_updates: {},
 				matter_device: {},
 				panasonic_ac: {}
 			}
