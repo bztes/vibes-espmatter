@@ -27,6 +27,40 @@ struct mesp_node_t {
     uint32_t device_type[MESP_MAX_EPS];
 };
 
+/** Bits of mesp_climate_t::known. */
+enum : uint16_t {
+    CLIMATE_LOCAL = 0x0001,
+    CLIMATE_OUTDOOR = 0x0002,
+    CLIMATE_HEAT = 0x0004,
+    CLIMATE_COOL = 0x0008,
+    CLIMATE_MODE = 0x0010,
+    CLIMATE_HEAT_LIMITS = 0x0020,
+    CLIMATE_COOL_LIMITS = 0x0040,
+    CLIMATE_FAN_MODE = 0x0080,
+    CLIMATE_ROCK = 0x0100,
+};
+
+/** Last reported Thermostat and Fan Control state; one per node (its first such endpoint). */
+struct mesp_climate_t {
+    uint16_t known;   // CLIMATE_*, 0 = nothing reported
+    uint16_t ep;
+    int16_t local;    // LocalTemperature, 0.01 °C
+    int16_t outdoor;  // OutdoorTemperature, 0.01 °C
+    int16_t heat;     // OccupiedHeatingSetpoint, 0.01 °C
+    int16_t cool;     // OccupiedCoolingSetpoint, 0.01 °C
+    int16_t heat_min; // setpoint limits
+    int16_t heat_max;
+    int16_t cool_min;
+    int16_t cool_max;
+    uint8_t mode;         // SystemMode
+    uint8_t features;     // Thermostat FeatureMap
+    uint8_t fan_mode;     // FanMode
+    uint8_t fan_sequence; // FanModeSequence
+    uint8_t fan_features; // Fan Control FeatureMap
+    uint8_t rock_support; // RockSupport
+    uint8_t rock;         // RockSetting
+};
+
 // The registry: index `i < s_node_count` is a node in all arrays. Only with the nodes lock held.
 extern mesp_node_t s_nodes[MESP_MAX_NODES];
 extern char s_tags[MESP_MAX_NODES][64];
@@ -36,6 +70,7 @@ extern mesp_measure_t s_measure[MESP_MAX_NODES][MESP_MAX_EPS];
 extern uint32_t s_switch_features[MESP_MAX_NODES][MESP_MAX_EPS];
 extern mesp_battery_t s_battery[MESP_MAX_NODES];
 extern mesp_power_t s_power[MESP_MAX_NODES];
+extern mesp_climate_t s_climate[MESP_MAX_NODES];
 extern size_t s_node_count;
 extern SemaphoreHandle_t s_mutex;
 

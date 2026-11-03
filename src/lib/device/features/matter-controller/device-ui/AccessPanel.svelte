@@ -1,6 +1,6 @@
 <!--
-	Admin dashboard: the endpoints (lights, plugs, sensors) each user (not admin) sees on the user
-	dashboard, and whether they may control a light or plug or only view it (espm_matter_access.cpp). Admins see and
+	Admin dashboard: the endpoints each user (not admin) sees on the user
+	dashboard, and whether they may control them or only view them (espm_matter_access.cpp). Admins see and
 	control all of them anyway.
 -->
 <script lang="ts">
@@ -9,7 +9,14 @@
 	import { live } from '../../web-ui/device-ui/live.svelte';
 	import Panel from '../../web-ui/device-ui/Panel.svelte';
 	import { Alert, Button, Chip } from '../../../device-ui/ui';
-	import { SWITCHABLE_TYPES, SENSOR_TYPES, endpointName, matterNodes, nodeName } from './matter';
+	import {
+		SWITCHABLE_TYPES,
+		SENSOR_TYPES,
+		CLIMATE_TYPES,
+		endpointName,
+		matterNodes,
+		nodeName
+	} from './matter';
 
 	type Granted = { node: number; endpoint: number; readOnly?: boolean };
 	type Level = 'control' | 'view';
@@ -24,7 +31,7 @@
 	const nodes = matterNodes();
 
 	/**
-	 * One choice per light or plug, and one per sensor device covering all of its sensor endpoints. Sensors
+	 * One choice per controllable endpoint, and one per sensor device covering all of its sensor endpoints. Sensors
 	 * have nothing to control: they are only shown or not.
 	 */
 	const choices = $derived(
@@ -40,6 +47,14 @@
 							key: `${node.id}:${ep.id}`,
 							keys: [`${node.id}:${ep.id}`],
 							name: endpointName(node, ep, 'light'),
+							controllable: true
+						})),
+					...node.endpoints
+						.filter((ep) => CLIMATE_TYPES.includes(ep.deviceType))
+						.map((ep) => ({
+							key: `${node.id}:${ep.id}`,
+							keys: [`${node.id}:${ep.id}`],
+							name: endpointName(node, ep, 'unit'),
 							controllable: true
 						})),
 					...(sensorKeys.length
@@ -74,7 +89,7 @@
 	const levelOf = (sel: Selection, keys: string[]): Level | undefined =>
 		keys.every((k) => sel[k]) ? sel[keys[0]] : undefined;
 
-	/** Lights and plugs: off → control → view only → off. Sensors: off ↔ shown. */
+	/** Controllable: off → control → view only → off. Sensors: off ↔ shown. */
 	function next(sel: Selection, l: (typeof choices)[number]): Selection {
 		const level = levelOf(sel, l.keys);
 		const to: Level | undefined = !level
@@ -115,14 +130,13 @@
 <Panel title="Dashboard access">
 	{#if members.length === 0}
 		<p class="text-muted">
-			No users yet – admins see every light, plug and sensor. Add a user with the role “User” to
-			give them some.
+			No users yet – admins see every device. Add a user with the role “User” to give them some.
 		</p>
 	{:else if choices.length === 0}
-		<p class="text-muted">No lights, plugs or sensors paired yet.</p>
+		<p class="text-muted">No devices paired yet.</p>
 	{:else}
 		<p class="text-sm text-muted">
-			Tap a light or plug once to let the user control it, a second time to let them only view it (<Eye
+			Tap a device once to let the user control it, a second time to let them only view it (<Eye
 				size={13}
 				class="inline align-[-2px]"
 			/>).

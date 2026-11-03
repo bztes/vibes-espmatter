@@ -9,6 +9,7 @@
 #include <esp_matter.h>
 #include <esp_matter_controller_cluster_command.h>
 #include <esp_matter_controller_pairing_command.h>
+#include <esp_matter_controller_write_command.h>
 
 #include <app-common/zap-generated/cluster-objects.h>
 
@@ -125,6 +126,26 @@ static esp_err_t nodes_handler(httpd_req_t *req)
                     j.key("measuredAge").num((now - at) / 1000000);
                 }
                 if (s_switch_features[i][e]) j.key("switchFeatures").num(s_switch_features[i][e]);
+                const mesp_climate_t &c = s_climate[i];
+                if (c.known && c.ep == n.ep[e]) {
+                    j.key("climate").obj();
+                    if (c.known & CLIMATE_LOCAL) j.key("temperature").num(c.local);
+                    if (c.known & CLIMATE_OUTDOOR) j.key("outdoor").num(c.outdoor);
+                    if (c.known & CLIMATE_HEAT) j.key("heating").num(c.heat);
+                    if (c.known & CLIMATE_COOL) j.key("cooling").num(c.cool);
+                    if ((c.known & CLIMATE_HEAT_LIMITS) && c.heat_min > INT16_MIN && c.heat_max < INT16_MAX)
+                        j.key("heatingMin").num(c.heat_min).key("heatingMax").num(c.heat_max);
+                    if ((c.known & CLIMATE_COOL_LIMITS) && c.cool_min > INT16_MIN && c.cool_max < INT16_MAX)
+                        j.key("coolingMin").num(c.cool_min).key("coolingMax").num(c.cool_max);
+                    if (c.known & CLIMATE_MODE) j.key("mode").num(c.mode);
+                    j.key("features").num(c.features);
+                    if (c.known & CLIMATE_FAN_MODE) {
+                        j.key("fanMode").num(c.fan_mode).key("fanSequence").num(c.fan_sequence);
+                        j.key("fanFeatures").num(c.fan_features);
+                    }
+                    if (c.known & CLIMATE_ROCK) j.key("rock").num(c.rock).key("rockSupport").num(c.rock_support);
+                    j.end_obj();
+                }
                 j.end_obj();
             }
             j.end_arr();
@@ -191,8 +212,8 @@ static esp_err_t node_action_handler(httpd_req_t *req)
     }
     if (idx < 0) return mesp_web_send_error(req, "404 Not Found", "unknown node");
 
-    // Dashboard users may read the state of the endpoints they see and switch, dim or tint those they
-    // control – nothing else.
+    // Dashboard users may read the state of the endpoints they see and switch, dim, tint or set the
+    // climate of those they control – nothing else.
     if (session.role != MESP_ROLE_ADMIN) {
         std::string ep_str, cluster_str;
         uint64_t ep = 0, cluster = 0;
@@ -204,6 +225,9 @@ static esp_err_t node_action_handler(httpd_req_t *req)
                    mesp_web_param(body, "cluster", cluster_str) && mesp_parse_u64(cluster_str, cluster)) {
             allowed = (cluster == OnOff::Id || cluster == LevelControl::Id || cluster == ColorControl::Id) &&
                       mesp_matter_allows(session, node_id, ep);
+        } else if (action == "write" && mesp_web_param(body, "endpoint", ep_str) && mesp_parse_u64(ep_str, ep) &&
+                   mesp_web_param(body, "cluster", cluster_str) && mesp_parse_u64(cluster_str, cluster)) {
+            allowed = (cluster == Thermostat::Id || cluster == FanControl::Id) && mesp_matter_allows(session, node_id, ep);
         }
         if (!allowed) return mesp_web_send_error(req, "403 Forbidden", "not allowed for this account");
     }
@@ -269,6 +293,23 @@ static esp_err_t node_action_handler(httpd_req_t *req)
         esp_matter::lock::ScopedChipStackLock chip_lock(portMAX_DELAY);
         err = controller::send_invoke_cluster_command(node_id, ep_id, cluster_id, command_id,
                                                       data.empty() ? nullptr : data.c_str());
+        if (err == ESP_OK) {
+            NodesLock lock;
+            s_last_seen[idx] = esp_timer_get_time();
+        }
+    } else if (action == "write") {
+        std::string ep, cluster, attribute, value;
+        mesp_web_param(body, "endpoint", ep);
+        mesp_web_param(body, "cluster", cluster);
+        mesp_web_param(body, "attribute", attribute);
+        mesp_web_param(body, "value", value);
+        uint64_t ep_id, cluster_id, attribute_id;
+        if (!mesp_parse_u64(ep, ep_id) || !mesp_parse_u64(cluster, cluster_id) ||
+            !mesp_parse_u64(attribute, attribute_id) || value.empty()) {
+            return mesp_web_send_error(req, "400 Bad Request", "endpoint, cluster, attribute and value are required");
+        }
+        esp_matter::lock::ScopedChipStackLock chip_lock(portMAX_DELAY);
+        err = controller::send_write_attr_command(node_id, ep_id, cluster_id, attribute_id, value.c_str());
         if (err == ESP_OK) {
             NodesLock lock;
             s_last_seen[idx] = esp_timer_get_time();

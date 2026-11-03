@@ -20,6 +20,31 @@ export interface MatterEndpoint {
 	measuredAge?: number;
 	/** Buttons: FeatureMap of the Switch cluster, once reported. */
 	switchFeatures?: number;
+	/** Climate devices, once reported. */
+	climate?: MatterClimate;
+}
+
+/** Thermostat and Fan Control attributes; temperatures in 0.01 °C. */
+export interface MatterClimate {
+	temperature?: number;
+	outdoor?: number;
+	heating?: number;
+	cooling?: number;
+	heatingMin?: number;
+	heatingMax?: number;
+	coolingMin?: number;
+	coolingMax?: number;
+	/** SystemMode (`SYSTEM_MODE`). */
+	mode?: number;
+	/** FeatureMap of the Thermostat cluster (`THERMOSTAT_HEATING` …). */
+	features: number;
+	/** FanMode (`FAN_MODE`) and FanModeSequence. */
+	fanMode?: number;
+	fanSequence?: number;
+	fanFeatures?: number;
+	/** RockSetting and RockSupport: swing, bitmaps. */
+	rock?: number;
+	rockSupport?: number;
 }
 
 export interface MatterNode {
@@ -88,6 +113,15 @@ export const COLOR_TEMPERATURE_TYPES = [0x010c, 0x010d];
 /** Temperature and humidity sensors: the hub subscribes to their values. */
 export const SENSOR_TYPES = [0x0302, 0x0307];
 export const GENERIC_SWITCH = 0x000f;
+
+export const ROOM_AIR_CONDITIONER = 0x0072;
+export const CLIMATE_TYPES = [ROOM_AIR_CONDITIONER, 0x0301];
+
+export const SYSTEM_MODE = { off: 0, auto: 1, cool: 3, heat: 4, fan: 7, dry: 8 } as const;
+export const THERMOSTAT_HEATING = 0x01;
+export const THERMOSTAT_COOLING = 0x02;
+export const THERMOSTAT_AUTO = 0x20;
+export const FAN_MODE = { off: 0, low: 1, medium: 2, high: 3, auto: 5 } as const;
 
 export const nodeName = (n: MatterNode) =>
 	n.name || [n.vendor, n.product].filter(Boolean).join(' ') || `Node ${n.id}`;

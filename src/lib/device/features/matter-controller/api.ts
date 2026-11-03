@@ -9,7 +9,7 @@ export const api: DeviceApiRoute[] = [
 		path: '/api/matter/nodes',
 		summary: 'Paired devices with their endpoints and last known state',
 		description:
-			'Users get only the endpoints they were given (`/api/matter/access`); those they may only view have `readOnly: true`. On/off state, sensor values and `switchFeatures` (FeatureMap of a button’s Switch cluster) appear once read or reported; temperature in 0.01 °C, humidity in 0.01 %, ages and `lastSeen` in seconds.',
+			'Users get only the endpoints they were given (`/api/matter/access`); those they may only view have `readOnly: true`. On/off state, sensor values, `switchFeatures` (FeatureMap of a button’s Switch cluster) and `climate` (Thermostat and Fan Control attributes) appear once read or reported; temperatures in 0.01 °C, humidity in 0.01 %, ages and `lastSeen` in seconds.',
 		access: 'user',
 		response: {
 			nodes: [
@@ -76,14 +76,14 @@ export const api: DeviceApiRoute[] = [
 		path: '/api/matter/node',
 		summary: 'Act on a paired device',
 		description:
-			'`rename` (`name`), `tag` (`tags`), `refresh` (read vendor, product and endpoints again), `state` (read on/off state now), `invoke` (send a cluster command), `remove` (unpair, then forget) or `forget` (only drop it here). Users may only `state` the devices they see and `invoke` On/Off, Level Control and Color Control on the endpoints they control.',
+			'`rename` (`name`), `tag` (`tags`), `refresh` (read vendor, product and endpoints again), `state` (read on/off state now), `invoke` (send a cluster command), `write` (write an attribute), `remove` (unpair, then forget) or `forget` (only drop it here). Users may only `state` the devices they see, `invoke` On/Off, Level Control and Color Control and `write` Thermostat and Fan Control on the endpoints they control.',
 		access: 'user',
 		params: [
 			{ ...NODE_ID, required: true },
 			{
 				name: 'action',
 				type: 'string',
-				description: '`rename`, `tag`, `refresh`, `state`, `invoke`, `remove` or `forget`',
+				description: '`rename`, `tag`, `refresh`, `state`, `invoke`, `write`, `remove` or `forget`',
 				required: true
 			},
 			{ name: 'name', type: 'string', description: '`rename`: the new name' },
@@ -92,14 +92,28 @@ export const api: DeviceApiRoute[] = [
 				type: 'string',
 				description: '`tag`: comma-separated tags (max. 63 characters); empty: none'
 			},
-			{ name: 'endpoint', type: 'number', description: '`invoke`: endpoint id' },
-			{ name: 'cluster', type: 'number', description: '`invoke`: cluster id, e.g. `6` (On/Off)' },
+			{ name: 'endpoint', type: 'number', description: '`invoke`, `write`: endpoint id' },
+			{
+				name: 'cluster',
+				type: 'number',
+				description: '`invoke`, `write`: cluster id, e.g. `6` (On/Off)'
+			},
 			{ name: 'command', type: 'number', description: '`invoke`: command id, e.g. `2` (Toggle)' },
 			{
 				name: 'data',
 				type: 'string',
 				description:
 					'`invoke`: command fields as JSON in esp-matter’s format, e.g. `{"0:U8": 128, "1:U16": 5}`'
+			},
+			{
+				name: 'attribute',
+				type: 'number',
+				description: '`write`: attribute id'
+			},
+			{
+				name: 'value',
+				type: 'string',
+				description: '`write`: value as JSON, e.g. `{"0:I16": 2150}`'
 			}
 		],
 		response: { ok: true }

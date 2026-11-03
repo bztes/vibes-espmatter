@@ -1,4 +1,4 @@
-<!-- User dashboard: tiles for lights, plugs and temperature/humidity sensors (switches are left out), by name – optionally grouped by type or by the tags an admin gave them. -->
+<!-- User dashboard: a tile per device (switches are left out), by name – optionally grouped by type or by the tags an admin gave them. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, hexId } from '../../web-ui/device-ui/api';
@@ -8,6 +8,7 @@
 		SWITCHABLE_TYPES,
 		PLUG_TYPES,
 		SENSOR_TYPES,
+		CLIMATE_TYPES,
 		endpointName,
 		matterNodes,
 		nodeName,
@@ -15,6 +16,7 @@
 	} from './matter';
 	import SwitchableTile from './SwitchableTile.svelte';
 	import SensorTile from './SensorTile.svelte';
+	import ClimateTile from './ClimateTile.svelte';
 
 	/**
 	 * On/off, brightness and color temperature are only read on demand – refresh them now and then
@@ -29,7 +31,7 @@
 		['tag', 'Tag']
 	] as const;
 	type Grouping = (typeof GROUPINGS)[number][0];
-	const TYPES = { light: 'Lights', plug: 'Plugs', sensor: 'Sensors' } as const;
+	const TYPES = { light: 'Lights', plug: 'Plugs', climate: 'Climate', sensor: 'Sensors' } as const;
 	const GROUPING_KEY = 'dashboard.grouping';
 	const UNTAGGED = 'Untagged';
 
@@ -94,15 +96,32 @@
 		})
 	);
 
+	/** Subscribed to, not read on demand. */
+	const climates = $derived(
+		(nodes.data?.nodes ?? []).flatMap((node) =>
+			node.endpoints
+				.filter((ep) => CLIMATE_TYPES.includes(ep.deviceType))
+				.map((ep) => ({
+					node,
+					ep,
+					key: `${node.id}:${ep.id}`,
+					name: endpointName(node, ep, 'unit'),
+					type: 'climate' as const
+				}))
+		)
+	);
+
 	type Item =
 		| ({ kind: 'switchable' } & (typeof tiles)[number])
-		| ({ kind: 'sensor' } & (typeof sensors)[number]);
+		| ({ kind: 'sensor' } & (typeof sensors)[number])
+		| ({ kind: 'climate' } & (typeof climates)[number]);
 	const byName = (a: string, b: string) =>
 		a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 	const items = $derived<Item[]>(
 		[
 			...tiles.map((t) => ({ kind: 'switchable' as const, ...t })),
-			...sensors.map((s) => ({ kind: 'sensor' as const, ...s }))
+			...sensors.map((s) => ({ kind: 'sensor' as const, ...s })),
+			...climates.map((c) => ({ kind: 'climate' as const, ...c }))
 		].sort((a, b) => byName(a.name, b.name))
 	);
 	/** Sections to show: one without a title when not grouped; by tag a device shows under each of its tags. */
@@ -153,8 +172,8 @@
 
 	{#if !nodes.data}
 		<p class="text-muted">{nodes.error ?? 'Loading…'}</p>
-	{:else if tiles.length === 0 && sensors.length === 0}
-		<p class="text-muted">No lights, plugs or sensors yet.</p>
+	{:else if items.length === 0}
+		<p class="text-muted">No devices yet.</p>
 	{:else}
 		<div class="grid gap-5">
 			{#each groups as group (group.title)}
@@ -168,6 +187,14 @@
 									name={item.name}
 									endpoint={item.ep}
 									power={item.power}
+									reachable={item.node.lastSeen === null || item.node.lastSeen < STALE_S}
+									onupdate={nodes.refresh}
+								/>
+							{:else if item.kind === 'climate'}
+								<ClimateTile
+									nodeId={item.node.id}
+									name={item.name}
+									endpoint={item.ep}
 									reachable={item.node.lastSeen === null || item.node.lastSeen < STALE_S}
 									onupdate={nodes.refresh}
 								/>

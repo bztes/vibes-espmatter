@@ -57,6 +57,9 @@ mesp_battery_t matter_nodes::s_battery[MESP_MAX_NODES];
 /** Last read power draw and energy total of a node (runtime only). */
 mesp_power_t matter_nodes::s_power[MESP_MAX_NODES];
 
+/** Last reported climate state of a node (runtime only). */
+mesp_climate_t matter_nodes::s_climate[MESP_MAX_NODES];
+
 /** Features that keep something per node (mesp_matter_on_node_removed). */
 #define MAX_REMOVED_LISTENERS 4
 static void (*s_removed_listeners[MAX_REMOVED_LISTENERS])(uint64_t node_id);
@@ -140,6 +143,88 @@ void matter_nodes::notify_values(int idx, bool current)
         if (cb) cb(v, current);
 }
 
+/** Thermostat and Fan Control attributes; the rest of the clusters is ignored. */
+static void store_climate(int idx, const ConcreteDataAttributePath &path, chip::TLV::TLVReader &reader)
+{
+    namespace TA = Thermostat::Attributes;
+    namespace FA = FanControl::Attributes;
+    mesp_climate_t &c = s_climate[idx];
+    if (c.known && c.ep != path.mEndpointId) return; // one per node
+    c.ep = path.mEndpointId;
+    // Keep the narrowest of the absolute and configured limits.
+    auto limit = [&](uint16_t bit, int16_t &min, int16_t &max, bool is_min) {
+        int16_t v;
+        if (chip::app::DataModel::Decode(reader, v) != CHIP_NO_ERROR) return;
+        if (!(c.known & bit)) {
+            min = INT16_MIN;
+            max = INT16_MAX;
+            c.known |= bit;
+        }
+        if (is_min && v > min) min = v;
+        if (!is_min && v < max) max = v;
+    };
+    auto u8 = [&](uint16_t bit, uint8_t &out) {
+        uint8_t v;
+        if (chip::app::DataModel::Decode(reader, v) != CHIP_NO_ERROR) return;
+        out = v;
+        c.known |= bit;
+    };
+    auto features = [&](uint8_t &out) {
+        uint32_t v;
+        if (chip::app::DataModel::Decode(reader, v) == CHIP_NO_ERROR) out = v;
+    };
+
+    if (path.mClusterId == Thermostat::Id) {
+        switch (path.mAttributeId) {
+        case TA::LocalTemperature::Id:
+        case TA::OutdoorTemperature::Id: {
+            const bool local = path.mAttributeId == TA::LocalTemperature::Id;
+            const uint16_t bit = local ? CLIMATE_LOCAL : CLIMATE_OUTDOOR;
+            chip::app::DataModel::Nullable<int16_t> v;
+            if (chip::app::DataModel::Decode(reader, v) != CHIP_NO_ERROR) return;
+            // Null: no reading – rather none than a stale one.
+            if (v.IsNull()) {
+                c.known &= ~bit;
+            } else {
+                (local ? c.local : c.outdoor) = v.Value();
+                c.known |= bit;
+            }
+            break;
+        }
+        case TA::OccupiedHeatingSetpoint::Id:
+        case TA::OccupiedCoolingSetpoint::Id: {
+            const bool heat = path.mAttributeId == TA::OccupiedHeatingSetpoint::Id;
+            int16_t v;
+            if (chip::app::DataModel::Decode(reader, v) != CHIP_NO_ERROR) return;
+            (heat ? c.heat : c.cool) = v;
+            c.known |= heat ? CLIMATE_HEAT : CLIMATE_COOL;
+            break;
+        }
+        case TA::AbsMinHeatSetpointLimit::Id:
+        case TA::MinHeatSetpointLimit::Id: limit(CLIMATE_HEAT_LIMITS, c.heat_min, c.heat_max, true); break;
+        case TA::AbsMaxHeatSetpointLimit::Id:
+        case TA::MaxHeatSetpointLimit::Id: limit(CLIMATE_HEAT_LIMITS, c.heat_min, c.heat_max, false); break;
+        case TA::AbsMinCoolSetpointLimit::Id:
+        case TA::MinCoolSetpointLimit::Id: limit(CLIMATE_COOL_LIMITS, c.cool_min, c.cool_max, true); break;
+        case TA::AbsMaxCoolSetpointLimit::Id:
+        case TA::MaxCoolSetpointLimit::Id: limit(CLIMATE_COOL_LIMITS, c.cool_min, c.cool_max, false); break;
+        case TA::SystemMode::Id: u8(CLIMATE_MODE, c.mode); break;
+        case TA::FeatureMap::Id: features(c.features); break;
+        default: return;
+        }
+    } else {
+        switch (path.mAttributeId) {
+        case FA::FanMode::Id: u8(CLIMATE_FAN_MODE, c.fan_mode); break;
+        case FA::FanModeSequence::Id: u8(0, c.fan_sequence); break;
+        case FA::RockSupport::Id: u8(0, c.rock_support); break;
+        case FA::RockSetting::Id: u8(CLIMATE_ROCK, c.rock); break;
+        case FA::FeatureMap::Id: features(c.fan_features); break;
+        default: return;
+        }
+    }
+    s_last_seen[idx] = esp_timer_get_time();
+}
+
 static void store_attribute(int idx, const ConcreteDataAttributePath &path, chip::TLV::TLVReader *data)
 {
     mesp_node_t &node = s_nodes[idx];
@@ -206,6 +291,11 @@ static void store_attribute(int idx, const ConcreteDataAttributePath &path, chip
             return;
         }
         s_last_seen[idx] = now;
+        return;
+    }
+
+    if (path.mClusterId == Thermostat::Id || path.mClusterId == FanControl::Id) {
+        store_climate(idx, path, reader);
         return;
     }
 
@@ -404,7 +494,8 @@ void mesp_matter_attribute_report(uint64_t node_id, const ConcreteDataAttributeP
     if (path.mClusterId == PowerSource::Id || path.mClusterId == TemperatureMeasurement::Id ||
         path.mClusterId == RelativeHumidityMeasurement::Id || path.mClusterId == OnOff::Id ||
         path.mClusterId == LevelControl::Id || path.mClusterId == ColorControl::Id || path.mClusterId == Switch::Id ||
-        path.mClusterId == ElectricalPowerMeasurement::Id || path.mClusterId == ElectricalEnergyMeasurement::Id) {
+        path.mClusterId == ElectricalPowerMeasurement::Id || path.mClusterId == ElectricalEnergyMeasurement::Id ||
+        path.mClusterId == Thermostat::Id || path.mClusterId == FanControl::Id) {
         on_attribute(node_id, path, data);
     }
 }
@@ -482,6 +573,7 @@ static void on_commissioning_success(chip::ScopedNodeId peer)
             memset(s_switch_features[s_node_count], 0, sizeof(s_switch_features[s_node_count]));
             s_battery[s_node_count] = {-1, -1, 0};
             s_power[s_node_count] = {};
+            s_climate[s_node_count] = {};
             s_node_count++;
             nodes_save();
         }
@@ -673,6 +765,7 @@ void matter_nodes::node_remove(int idx)
         memcpy(s_switch_features[i], s_switch_features[i + 1], sizeof(s_switch_features[i]));
         s_battery[i] = s_battery[i + 1];
         s_power[i] = s_power[i + 1];
+        s_climate[i] = s_climate[i + 1];
         memcpy(s_tags[i], s_tags[i + 1], sizeof(s_tags[i]));
     }
     s_node_count--;

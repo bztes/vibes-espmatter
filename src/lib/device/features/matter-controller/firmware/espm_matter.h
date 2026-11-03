@@ -36,7 +36,8 @@ class TLVReader;
 
 /**
  * Attributes a subscription reported that the node list shows: battery (Power Source cluster),
- * temperature, humidity, on/off and the Switch FeatureMap. Others are ignored.
+ * temperature, humidity, on/off, climate (Thermostat, Fan Control) and the Switch FeatureMap.
+ * Others are ignored.
  */
 void mesp_matter_attribute_report(uint64_t node_id, const chip::app::ConcreteDataAttributePath &path,
                                   chip::TLV::TLVReader *data);
@@ -48,7 +49,7 @@ void mesp_matter_node_lost(uint64_t node_id);
 /** FeatureMap of the Switch cluster of an endpoint, once reported; 0 if unknown. */
 uint32_t mesp_matter_switch_features(uint64_t node_id, uint16_t ep);
 
-/** Subscriptions (espm_subscriptions.cpp): button events, battery, sensors and on/off of the nodes. */
+/** Subscriptions (espm_subscriptions.cpp): button events, battery, sensors, on/off and climate of the nodes. */
 void mesp_matter_subscriptions_init();
 /** Subscribe to all nodes that report something. Call after mesp_matter_start_controller(). */
 void mesp_matter_subscriptions_start();

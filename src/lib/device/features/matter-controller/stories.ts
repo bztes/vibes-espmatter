@@ -87,14 +87,65 @@ export const nodes: MatterNode[] = [
 		tags: [],
 		lastSeen: null,
 		endpoints: [{ id: 1, deviceType: 0x010a }]
+	},
+	{
+		id: 7,
+		name: 'Heat pump',
+		vendor: 'vibes-espmatter',
+		product: 'Panasonic heat pump',
+		network: 'wifi',
+		tags: ['Living room'],
+		lastSeen: 3,
+		endpoints: [
+			{
+				id: 1,
+				deviceType: 0x0072,
+				on: true,
+				climate: {
+					temperature: 2050,
+					outdoor: -320,
+					heating: 2200,
+					cooling: 2600,
+					heatingMin: 1600,
+					heatingMax: 3000,
+					coolingMin: 1600,
+					coolingMax: 3000,
+					mode: 4,
+					features: 0x23,
+					fanMode: 5,
+					fanSequence: 2,
+					fanFeatures: 0x07,
+					rock: 2,
+					rockSupport: 3
+				}
+			}
+		]
+	},
+	{
+		id: 8,
+		name: 'Bathroom floor',
+		vendor: 'Eve',
+		product: 'Thermo',
+		network: 'thread',
+		tags: ['Bathroom'],
+		lastSeen: 600,
+		battery: { percent: 64, age: 1800 },
+		endpoints: [
+			{
+				id: 1,
+				deviceType: 0x0301,
+				climate: { temperature: 1980, heating: 2100, mode: 0, features: 0x01 }
+			}
+		]
 	}
 ];
 
-/** What the user `anna` sees: the lamps and the climate sensor, the desk lamp only to view. */
+/** What the user `anna` sees: some of the devices, the desk lamp only to view. */
 const annasNodes: MatterNode[] = [
 	nodes[0],
 	{ ...nodes[1], endpoints: [{ ...nodes[1].endpoints[0], readOnly: true }] },
-	nodes[3]
+	nodes[3],
+	nodes[6]
 ];
 
 export const api = {
@@ -107,7 +158,8 @@ export const api = {
 				{ node: 1, endpoint: 1 },
 				{ node: 2, endpoint: 1, readOnly: true },
 				{ node: 4, endpoint: 1 },
-				{ node: 4, endpoint: 2 }
+				{ node: 4, endpoint: 2 },
+				{ node: 7, endpoint: 1 }
 			]
 		}
 	},
