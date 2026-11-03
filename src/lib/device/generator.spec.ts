@@ -358,6 +358,7 @@ function heatPumpProject() {
 	const project = defaultProject('panasonic-heat-pump', 'Living room heat pump');
 	chip(project, 'main').features.wifi.ssid = 'MyWifi';
 	chip(project, 'main').features.wifi.password = 'secret-password';
+	chip(project, 'main').features.http_server.password = 'initial-pw';
 	return project;
 }
 
@@ -370,6 +371,21 @@ describe('panasonic heat pump', () => {
 		expect(main.features.panasonic_ac).toMatchObject({ port: 'cnt', rxGpio: 4, txGpio: 5 });
 		// the BOOT button (GPIO0) isn't on the SuperMini's header but is a valid reset button
 		expect(main.features.matter_device.resetGpio).toBe(0);
+	});
+
+	it('updates over the air on 4 MB flash', () => {
+		const [main] = generateProject(heatPumpProject());
+		expect(main.files['partitions.csv']).toContain('ota_1');
+	});
+
+	it('needs 8 MB flash for over-the-air updates of the controller', () => {
+		const project = hubProject();
+		const host = chip(project, 'host');
+		if (!host.features.ota) addFeature(host, 'ota');
+		host.features.device.flashSize = '4';
+		expect(validateProject(project).map((i) => i.message)).toContain(
+			'Over-the-air updates with the Matter controller need at least 8 MB flash.'
+		);
 	});
 
 	it('generates a commissionable Matter device', () => {
@@ -466,6 +482,39 @@ describe('panasonic heat pump', () => {
 	});
 });
 
+describe('panasonic heat pump on Thread', () => {
+	it('creates a valid single-chip device without Wi-Fi', () => {
+		const project = defaultProject('panasonic-heat-pump-thread', 'Bedroom heat pump');
+		expect(validateProject(project)).toEqual([]);
+		const main = chip(project, 'main');
+		expect(main.board).toBe('esp32-h2-supermini');
+		expect(main.features.wifi).toBeUndefined();
+		expect(main.features.panasonic_ac).toMatchObject({ rxGpio: 4, txGpio: 5 });
+	});
+
+	it('generates a Matter over Thread device with the native radio', () => {
+		const [main] = generateProject(defaultProject('panasonic-heat-pump-thread', 'Bedroom'));
+		const sdk = main.files['sdkconfig.defaults'];
+		const app = main.files['main/app_main.cpp'];
+		expect(main.target).toBe('esp32h2');
+		expect(sdk).toContain('CONFIG_OPENTHREAD_ENABLED=y');
+		expect(sdk).toContain('# CONFIG_ENABLE_WIFI_STATION is not set');
+		expect(sdk).toContain('# CONFIG_LWIP_IPV6_AUTOCONFIG is not set');
+		expect(app.indexOf('set_openthread_platform_config')).toBeLessThan(
+			app.indexOf('esp_matter::start')
+		);
+		expect(main.notes.join('\n')).toContain('Thread border router');
+	});
+
+	it('needs a network for a Matter device', () => {
+		const project = defaultProject('panasonic-heat-pump-thread', 'Bedroom');
+		delete chip(project, 'main').features.thread;
+		expect(validateProject(project).map((i) => i.message)).toContain(
+			'Needs a network: add Wi-Fi or Thread.'
+		);
+	});
+});
+
 describe('opentelemetry metrics', () => {
 	function metricsProject() {
 		const project = heatPumpProject();
@@ -504,8 +553,14 @@ describe('opentelemetry metrics', () => {
 		expect(main.files['main/CMakeLists.txt']).toContain('"espm_ntp.cpp"');
 		expect(main.files['sdkconfig.defaults']).toContain('CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y');
 		expect(main.files['main/CMakeLists.txt']).toContain('"espm_otel.cpp"');
-		// the metric table exists before the heat pump records into it
-		expect(app.indexOf('mesp_otel_init();')).toBeLessThan(app.indexOf('mesp_pac_matter_init();'));
+		expect(main.files['main/CMakeLists.txt']).toContain('"espm_pac_metrics.cpp"');
+		// the metric table exists before the heat pump records into it, the listener before the UART runs
+		expect(app.indexOf('mesp_otel_init();')).toBeLessThan(
+			app.lastIndexOf('mesp_pac_metrics_init();')
+		);
+		expect(app.lastIndexOf('mesp_pac_metrics_init();')).toBeLessThan(
+			app.indexOf('mesp_pac_matter_start();')
+		);
 		expect(app.indexOf('esp_matter::start')).toBeLessThan(app.indexOf('mesp_otel_start();'));
 	});
 
@@ -563,6 +618,7 @@ describe('opentelemetry metrics', () => {
 	it('is off unless added', () => {
 		const [main] = generateProject(heatPumpProject());
 		expect(main.files['main/CMakeLists.txt']).not.toContain('espm_otel.cpp');
+		expect(main.files['main/espm_pac_matter.cpp']).not.toMatch(/otel/i);
 	});
 
 	it('shares the time server with the timers', () => {

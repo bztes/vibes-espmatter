@@ -11,7 +11,6 @@ import {
 	toValidPasscode,
 	validPasscode
 } from './onboarding';
-import { network } from '../wifi/services';
 
 /** Setup code of a chip: the configured one, or one derived from the device and chip name. */
 export function setupCode(
@@ -62,6 +61,7 @@ const validate: Validate<MatterDeviceConfig> = ({ config, has }) => {
 			field: 'passcode',
 			message: 'Setup passcode: 1–99999998, not a trivial one like 12345678 or 11111111.'
 		});
+	if (!has('wifi') && !has('thread')) errors.push('Needs a network: add Wi-Fi or Thread.');
 	if (has('matter_controller'))
 		errors.push('A board is either a Matter device or a Matter controller (hub), not both.');
 	return errors;
@@ -79,12 +79,11 @@ export default {
 	description: 'A Matter device for Apple Home, Google Home or Home Assistant.',
 	category: 'matter',
 	framework: 'esp-matter',
-	chips: ['esp32', 'esp32s3', 'esp32c3', 'esp32c6'],
+	chips: ['esp32', 'esp32s3', 'esp32c3', 'esp32c6', 'esp32h2'],
 	defaults,
 	pins: [{ key: 'resetGpio', label: 'Factory reset button', optional: true }],
 	validate,
-	activate({ use, config, project, role }) {
-		use(network);
+	activate({ use, has, config, project, role }) {
 		use(configuratorEditors).register(Editor);
 		use(firmware).register(() => {
 			const { passcode, discriminator } = setupCode(config, project.name, role.id);
@@ -122,7 +121,10 @@ export default {
 					postStart: ['mesp_node_start();']
 				},
 				notes: [
-					`Matter pairing code: ${manual} (QR code: ${qr}). Pair over Bluetooth with any Matter controller; with Wi-Fi configured the device also shows up on your network.`,
+					`Matter pairing code: ${manual} (QR code: ${qr}). ` +
+						(has('thread')
+							? 'Pair over Bluetooth with a Matter controller that has a Thread border router: it hands over the Thread network.'
+							: 'Pair over Bluetooth with any Matter controller; with Wi-Fi configured the device also shows up on your network.'),
 					'The device uses Matter test certificates (like all DIY devices): controllers warn that it is uncertified. A Matter Thread Hub needs “Test PAA only” as its attestation trust store to pair it.',
 					Number(config.resetGpio) >= 0
 						? `Factory reset (forget all pairings): hold GPIO${config.resetGpio} low for 10 s.`

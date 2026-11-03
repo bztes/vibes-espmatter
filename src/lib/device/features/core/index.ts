@@ -9,7 +9,7 @@ import type {
 import Editor, { FLASH_SIZES, PSRAM_MODES, CONSOLES } from './configurator/Editor.svelte';
 
 /** Smallest flash with room for two app slots (`FeatureDef.otaSlots`). */
-export const OTA_MIN_FLASH_MB = 8;
+export const OTA_MIN_FLASH_MB = 4;
 
 /** The board's PSRAM as configured in "Chip & memory": `none`, `quad` or `octal`. */
 export function psramMode(ctx: GenerateContext): string {

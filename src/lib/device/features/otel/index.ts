@@ -23,9 +23,13 @@ const defaults = () => ({
 });
 export type OtelConfig = ReturnType<typeof defaults>;
 
-const validate: Validate<OtelConfig> = ({ config }) => {
+const validate: Validate<OtelConfig> = ({ config, has }) => {
 	const errors: FeatureIssue<OtelConfig>[] = [];
-	if (config.endpoint.length > 200)
+	if (!config.endpoint && !has('admin_dashboard'))
+		errors.push(
+			'OpenTelemetry needs an OTLP endpoint (or the admin dashboard to set it on the device).'
+		);
+	else if (config.endpoint.length > 200)
 		errors.push({ field: 'endpoint', message: 'OTLP endpoint must be at most 200 characters.' });
 	else if (config.endpoint && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(config.endpoint))
 		errors.push({

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { firmware } from './features/core/services';
 import { webServer } from './features/http-server/services';
-import { featureServices, requiredFeatures } from './generator';
+import { featureServices, requiredFeatures, softDependencies } from './generator';
 import { features } from './registry';
 import type { FeatureDef } from './types';
 
@@ -39,19 +40,68 @@ function reachable(feature: FeatureDef, seen = new Set<string>()): Set<string> {
 	return seen;
 }
 
+/** The sources the feature adds to the firmware with these features on the chip (default settings). */
+function firmwareSources(feature: FeatureDef, ids: Iterable<string>): Set<string> {
+	return new Set(
+		(
+			featureServices([...ids])
+				.find(firmware)
+				?.entries() ?? []
+		)
+			.filter((e) => e.feature.id === feature.id)
+			.flatMap((e) => Object.keys(e.item().sources ?? {}))
+	);
+}
+
+/**
+ * Sources a feature adds only when a feature it `find`s is on the chip (e.g. the heat pump's
+ * metrics with OpenTelemetry), by file name: they may also use the code of that feature.
+ */
+const joinSources = new Map<string, Set<string>>();
+const allIds = features.all().map((f) => f.id);
+const soft = softDependencies({
+	version: 2,
+	name: '',
+	chips: [
+		{
+			id: 'chip',
+			name: '',
+			board: 'esp32-s3-devkitc-1',
+			features: Object.fromEntries(allIds.map((id) => [id, {}]))
+		}
+	]
+}).get('chip')!;
+for (const feature of features.all()) {
+	const alone = firmwareSources(feature, reachable(feature));
+	for (const other of soft.get(feature.id) ?? []) {
+		const ids = reachable(features.get(other), new Set(reachable(feature)));
+		for (const file of firmwareSources(feature, ids)) {
+			if (alone.has(file)) continue;
+			joinSources.set(file, (joinSources.get(file) ?? new Set()).add(other));
+		}
+	}
+}
+
 describe('feature firmware', () => {
 	// The firmware only has the sources of the chip's features: a feature may only use the code of
-	// features it requires (`use`s), its web part also the HTTP server's. Code that joins two
-	// features belongs to a feature using both.
+	// features it requires (`use`s), its web part also the HTTP server's, and the sources it adds
+	// only when a feature it `find`s is there also that feature's.
 	it.each(Object.keys(sources))('%s includes only headers of features it requires', (path) => {
 		const [, , dir, , file] = path.split('/');
 		const allowed = reachable(byDir.get(dir)!);
 		if (webSources.has(file)) reachable(features.get('http_server'), allowed);
+		for (const id of joinSources.get(file) ?? []) reachable(features.get(id), allowed);
 		const foreign = [...sources[path].matchAll(/^\s*#\s*include\s+"([^"]+)"/gm)]
 			.map(([, header]) => header)
 			.filter((header) => owner.has(header) && !allowed.has(owner.get(header)!))
 			.map((header) => `${header} (${owner.get(header)})`);
 		expect(foreign).toEqual([]);
+	});
+
+	it('finds the sources that join two features', () => {
+		expect(Object.fromEntries([...joinSources].map(([file, ids]) => [file, [...ids]]))).toEqual({
+			'espm_pac_metrics.cpp': ['otel']
+		});
 	});
 
 	it('finds the web parts of the features', () => {
