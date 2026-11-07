@@ -1,0 +1,67 @@
+import { ctrl, defineBoard, gnd, gpio, named, power } from '#sdk';
+
+export default defineBoard({
+	id: 'esp32-s3-devkitc-1-n16r8',
+	name: 'ESP32-S3-DevKitC-1 (N16R8)',
+	vendor: 'Espressif',
+	chip: 'esp32s3',
+	description:
+		'Official S3 dev board, two USB-C ports: "UART" (USB bridge) and "USB" (native). GPIO35–37 are used by the octal PSRAM.',
+	url: 'https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitc-1/',
+	flashMB: 16,
+	psram: 'octal',
+	usb: 'both',
+	led: { gpio: 48, type: 'ws2812' },
+	button: { gpio: 0 },
+	buses: { i2c: { sda: 8, scl: 9 }, uart: { tx: 17, rx: 18 } },
+	headers: {
+		left: [
+			power('3V3'),
+			power('3V3'),
+			ctrl('RST'),
+			gpio(4),
+			gpio(5),
+			gpio(6),
+			gpio(7),
+			gpio(15),
+			gpio(16),
+			gpio(17),
+			gpio(18),
+			gpio(8),
+			gpio(3, ['strapping']),
+			gpio(46, ['strapping']),
+			gpio(9),
+			gpio(10),
+			gpio(11),
+			gpio(12),
+			gpio(13),
+			gpio(14),
+			power('5V', 'Bridge the "IN-OUT" pads to use 5V as an output.'),
+			gnd()
+		],
+		right: [
+			gnd(),
+			named('TX', 43, ['U0TXD'], 'console'),
+			named('RX', 44, ['U0RXD'], 'console'),
+			gpio(1),
+			gpio(2),
+			gpio(42),
+			gpio(41),
+			gpio(40),
+			gpio(39),
+			gpio(38),
+			gpio(37),
+			gpio(36),
+			gpio(35),
+			gpio(0, ['BOOT', 'strapping']),
+			gpio(45, ['strapping']),
+			gpio(48, ['RGB LED'], 'onboard RGB LED'),
+			gpio(47),
+			gpio(21),
+			gpio(20, ['USB D+']),
+			gpio(19, ['USB D-']),
+			gnd(),
+			gnd()
+		]
+	}
+});

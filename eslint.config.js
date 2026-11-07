@@ -20,9 +20,7 @@ export default defineConfig(
 		rules: {
 			// typescript-eslint strongly recommend that you do not use the no-undef lint rule on TypeScript projects.
 			// see: https://typescript-eslint.io/troubleshooting/faqs/eslint/#i-get-errors-from-the-no-undef-rule-about-global-variables-not-being-defined-even-though-there-are-no-typescript-errors
-			'no-undef': 'off',
-			// Use showAlert/showConfirm/showPrompt of the UI kit instead of the browser's dialogs.
-			'no-alert': 'error'
+			'no-undef': 'off'
 		}
 	},
 	{
@@ -34,11 +32,6 @@ export default defineConfig(
 				parser: ts.parser
 			}
 		}
-	},
-	{
-		// The device web interface runs on the ESP without SvelteKit: there is no resolve().
-		files: ['src/lib/device/**/*.svelte'],
-		rules: { 'svelte/no-navigation-without-resolve': 'off' }
 	},
 	{
 		// Override or add rule settings here, such as:

@@ -1,86 +1,118 @@
 CREATE TABLE `build` (
 	`id` text PRIMARY KEY NOT NULL,
-	`project_id` text,
+	`firmware_id` text NOT NULL,
 	`user_id` text,
-	`config_hash` text NOT NULL,
-	`config` text NOT NULL,
+	`version` integer NOT NULL,
 	`status` text DEFAULT 'queued' NOT NULL,
-	`roles` text NOT NULL,
+	`config` text NOT NULL,
+	`slots` text DEFAULT '{}' NOT NULL,
+	`step` text,
 	`error` text,
+	`runner_id` text,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
 	`started_at` integer,
 	`finished_at` integer,
-	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	FOREIGN KEY (`project_id`) REFERENCES `project`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`firmware_id`) REFERENCES `firmware`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
-CREATE INDEX `build_project_idx` ON `build` (`project_id`);--> statement-breakpoint
-CREATE INDEX `build_hash_idx` ON `build` (`config_hash`);--> statement-breakpoint
-CREATE TABLE `project` (
+CREATE INDEX `build_firmware_idx` ON `build` (`firmware_id`);--> statement-breakpoint
+CREATE TABLE `deployment` (
 	`id` text PRIMARY KEY NOT NULL,
-	`user_id` text NOT NULL,
-	`name` text NOT NULL,
-	`device_type` text NOT NULL,
-	`config` text NOT NULL,
-	`last_address` text,
-	`last_seen_at` integer,
+	`device_id` text NOT NULL,
+	`build_id` text NOT NULL,
+	`slot` text NOT NULL,
+	`version` integer NOT NULL,
+	`method` text NOT NULL,
+	`state` text DEFAULT 'pending' NOT NULL,
+	`message` text,
 	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
 	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`device_id`) REFERENCES `device`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`build_id`) REFERENCES `build`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `project_user_idx` ON `project` (`user_id`);--> statement-breakpoint
-CREATE TABLE `account` (
+CREATE INDEX `deployment_device_idx` ON `deployment` (`device_id`,`slot`);--> statement-breakpoint
+CREATE TABLE `device` (
 	`id` text PRIMARY KEY NOT NULL,
-	`account_id` text NOT NULL,
-	`provider_id` text NOT NULL,
-	`user_id` text NOT NULL,
-	`access_token` text,
-	`refresh_token` text,
-	`id_token` text,
-	`access_token_expires_at` integer,
-	`refresh_token_expires_at` integer,
-	`scope` text,
-	`password` text,
+	`owner_id` text NOT NULL,
+	`firmware_id` text NOT NULL,
+	`name` text NOT NULL,
+	`kind` text NOT NULL,
+	`location_id` text,
+	`settings` text NOT NULL,
+	`api_token` text NOT NULL,
+	`previous_token` text,
+	`hub_id` text,
+	`subdomain` text,
+	`last_seen_at` integer,
+	`reported` text DEFAULT '{}' NOT NULL,
 	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	FOREIGN KEY (`owner_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`firmware_id`) REFERENCES `firmware`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`location_id`) REFERENCES `location`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`hub_id`) REFERENCES `device`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
-CREATE INDEX `account_userId_idx` ON `account` (`user_id`);--> statement-breakpoint
-CREATE TABLE `session` (
+CREATE INDEX `device_owner_idx` ON `device` (`owner_id`);--> statement-breakpoint
+CREATE INDEX `device_firmware_idx` ON `device` (`firmware_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `device_subdomain_idx` ON `device` (`subdomain`);--> statement-breakpoint
+CREATE TABLE `firmware` (
 	`id` text PRIMARY KEY NOT NULL,
-	`expires_at` integer NOT NULL,
-	`token` text NOT NULL,
+	`owner_id` text NOT NULL,
+	`name` text NOT NULL,
+	`kind` text NOT NULL,
+	`config` text NOT NULL,
+	`next_version` integer DEFAULT 1 NOT NULL,
 	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	`updated_at` integer NOT NULL,
-	`ip_address` text,
-	`user_agent` text,
-	`user_id` text NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	FOREIGN KEY (`owner_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `session_token_unique` ON `session` (`token`);--> statement-breakpoint
-CREATE INDEX `session_userId_idx` ON `session` (`user_id`);--> statement-breakpoint
-CREATE TABLE `user` (
+CREATE INDEX `firmware_owner_idx` ON `firmware` (`owner_id`);--> statement-breakpoint
+CREATE TABLE `location` (
+	`id` text PRIMARY KEY NOT NULL,
+	`owner_id` text NOT NULL,
+	`name` text NOT NULL,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	FOREIGN KEY (`owner_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `location_owner_idx` ON `location` (`owner_id`);--> statement-breakpoint
+CREATE TABLE `runner` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
-	`email` text NOT NULL,
-	`email_verified` integer DEFAULT false NOT NULL,
-	`image` text,
-	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL
+	`kind` text NOT NULL,
+	`config` text NOT NULL,
+	`enabled` integer DEFAULT true NOT NULL,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `user_email_unique` ON `user` (`email`);--> statement-breakpoint
-CREATE TABLE `verification` (
+CREATE TABLE `session` (
 	`id` text PRIMARY KEY NOT NULL,
-	`identifier` text NOT NULL,
-	`value` text NOT NULL,
+	`user_id` text NOT NULL,
 	`expires_at` integer NOT NULL,
 	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `verification_identifier_idx` ON `verification` (`identifier`);
+CREATE INDEX `session_user_idx` ON `session` (`user_id`);--> statement-breakpoint
+CREATE TABLE `setting` (
+	`key` text PRIMARY KEY NOT NULL,
+	`value` text NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `user` (
+	`id` text PRIMARY KEY NOT NULL,
+	`email` text NOT NULL,
+	`name` text NOT NULL,
+	`password_hash` text NOT NULL,
+	`role` text DEFAULT 'user' NOT NULL,
+	`disabled` integer DEFAULT false NOT NULL,
+	`must_change_password` integer DEFAULT false NOT NULL,
+	`last_login_at` integer,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `user_email_unique` ON `user` (`email`);

@@ -1,0 +1,7 @@
+# OpenThread's static data (~38 KB, mostly the otInstance) goes to PSRAM: internal RAM is too
+# short on a hub with Matter controller and Wi-Fi to still fit the OpenThread task's stack.
+# Only OpenThread's own tasks use it, never an ISR or code running with the flash cache off.
+[mapping:espm_otbr]
+archive: libopenthread.a
+entries:
+    * (extram_bss)

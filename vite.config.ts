@@ -1,15 +1,35 @@
-import { enhancedImages } from '@sveltejs/enhanced-img';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
-import { playwright } from '@vitest/browser-playwright';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
-import pkg from './package.json' with { type: 'json' };
+import type { Plugin } from 'vite';
+
+/**
+ * WebSocket upgrades of device tunnels in `vite dev` / `vite preview` (production: server.js). The
+ * tunnel code registers itself on globalThis once the app's server code has loaded.
+ */
+const TUNNEL = /^\/api\/v1\/devices\/[0-9a-f-]{36}\/tunnel\/?(\?|$)/;
+function deviceTunnels(): Plugin {
+	const listen = (server: import('node:http').Server | null | undefined) =>
+		server?.on('upgrade', (req, socket, head) => {
+			if (!TUNNEL.test(req.url ?? '')) return; // e.g. Vite's HMR
+			const tunnels = (
+				globalThis as Record<symbol, { upgrade?: (...args: unknown[]) => boolean } | undefined>
+			)[Symbol.for('espmatter.tunnels')];
+			if (!tunnels?.upgrade?.(req, socket, head))
+				socket.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n');
+		});
+	return {
+		name: 'espmatter-device-tunnels',
+		configureServer: (server) => void listen(server.httpServer as import('node:http').Server),
+		configurePreviewServer: (server) => void listen(server.httpServer as import('node:http').Server)
+	};
+}
 
 export default defineConfig({
 	plugins: [
+		deviceTunnels(),
 		tailwindcss(),
-		enhancedImages(),
 		sveltekit({
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
@@ -18,41 +38,17 @@ export default defineConfig({
 				experimental: { async: true }
 			},
 			adapter: adapter(),
-			// Bumped by changesets on release; shown in the footer via `$app/env`.
-			version: { name: pkg.version },
 			experimental: { remoteFunctions: true }
 		})
 	],
-	// Pre-bundle the lazily imported flasher so Vite doesn't reload the page on first use in dev.
+	// Plugins (boards, features, peripherals) live next to `src/`, they may come from other repos.
+	// Devices connect to the app (tunnel, updates, telemetry): listen on the LAN, not only localhost.
+	server: { host: true, fs: { allow: ['plugins'] } },
+	preview: { host: true },
 	optimizeDeps: { include: ['esptool-js'] },
 	test: {
 		expect: { requireAssertions: true },
-		// Vitest empties CSS imports, `?raw` ones too: the device UI build bundles its theme raw.
-		css: { include: [/\.css\?raw$/] },
-		projects: [
-			{
-				extends: './vite.config.ts',
-				test: {
-					name: 'client',
-					browser: {
-						enabled: true,
-						provider: playwright(),
-						instances: [{ browser: 'chromium', headless: true }]
-					},
-					include: ['src/**/*.svelte.{test,spec}.{js,ts}'],
-					exclude: ['src/lib/server/**']
-				}
-			},
-
-			{
-				extends: './vite.config.ts',
-				test: {
-					name: 'server',
-					environment: 'node',
-					include: ['src/**/*.{test,spec}.{js,ts}'],
-					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}']
-				}
-			}
-		]
+		environment: 'node',
+		include: ['src/**/*.{test,spec}.{js,ts}', 'plugins/**/*.{test,spec}.{js,ts}']
 	}
 });

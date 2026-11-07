@@ -1,134 +1,218 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
-import type { ProjectConfig } from '#lib/device/types.ts';
-import { user } from './auth.schema';
-import type { BuildStatus, RoleBuildState } from '#lib/build-types.ts';
+import {
+	index,
+	integer,
+	sqliteTable,
+	text,
+	uniqueIndex,
+	type AnySQLiteColumn
+} from 'drizzle-orm/sqlite-core';
+import type { DeviceSettings, FirmwareConfig } from '#lib/core/model.ts';
+import type { BuildStatus, DeployMethod, DeployState, SlotArtifacts } from '#lib/types.ts';
 
-export type { BuildStatus, FlashPart, RoleArtifacts, RoleBuildState } from '#lib/build-types.ts';
+export type * from '#lib/types.ts';
 
-const timestamps = {
-	createdAt: integer('created_at', { mode: 'timestamp_ms' })
-		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-		.notNull(),
-	updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
-		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-		.$onUpdate(() => new Date())
+const now = sql`(cast(unixepoch('subsecond') * 1000 as integer))`;
+const createdAt = integer('created_at', { mode: 'timestamp_ms' }).notNull().default(now);
+const updatedAt = () =>
+	integer('updated_at', { mode: 'timestamp_ms' })
 		.notNull()
-};
+		.default(now)
+		.$onUpdate(() => new Date());
+const id = () =>
+	text('id')
+		.primaryKey()
+		.$defaultFn(() => crypto.randomUUID());
 
-/** A saved device configuration, owned by a user (see `server/owner.ts`). */
-export const project = sqliteTable(
-	'project',
+export type Role = 'admin' | 'user';
+
+export const user = sqliteTable('user', {
+	id: id(),
+	email: text('email').notNull().unique(),
+	name: text('name').notNull(),
+	passwordHash: text('password_hash').notNull(),
+	role: text('role').$type<Role>().notNull().default('user'),
+	disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
+	/** Set with a generated password (added by an admin, reset): changed at the next sign-in. */
+	mustChangePassword: integer('must_change_password', { mode: 'boolean' }).notNull().default(false),
+	lastLoginAt: integer('last_login_at', { mode: 'timestamp_ms' }),
+	createdAt
+});
+
+/** Login sessions; the id is the SHA-256 of the cookie value. */
+export const session = sqliteTable(
+	'session',
 	{
-		id: text('id')
-			.primaryKey()
-			.$defaultFn(() => crypto.randomUUID()),
+		id: text('id').primaryKey(),
 		userId: text('user_id')
 			.notNull()
 			.references(() => user.id, { onDelete: 'cascade' }),
-		name: text('name').notNull(),
-		/** Template the device was created from, or `custom`. */
-		deviceType: text('device_type').notNull(),
-		config: text('config', { mode: 'json' }).$type<ProjectConfig>().notNull(),
-		/** Web interface of the device as last reported over serial (`http://192.168.1.50`). */
-		lastAddress: text('last_address'),
-		lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }),
-		...timestamps
+		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+		createdAt
 	},
-	(t) => [index('project_user_idx').on(t.userId)]
+	(t) => [index('session_user_idx').on(t.userId)]
 );
 
-/** A firmware build of a configuration (saved project or anonymous). */
+/** Server-wide settings, one row per key (`server/settings.ts`). */
+export const setting = sqliteTable('setting', {
+	key: text('key').primaryKey(),
+	value: text('value', { mode: 'json' }).notNull()
+});
+
+export type DeviceKind = 'hub' | 'device';
+
+/** What a board last told the app (update reports), per slot. */
+export interface SlotReport {
+	running?: number;
+	/** Revision of the device configuration it runs. */
+	config?: string;
+	state?: string;
+	message?: string;
+	at?: number;
+}
+
+/** A location with its own devices, e.g. "Home" or "Parents". */
+export const location = sqliteTable(
+	'location',
+	{
+		id: id(),
+		ownerId: text('owner_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		createdAt
+	},
+	(t) => [index('location_owner_idx').on(t.ownerId)]
+);
+
+/** A firmware: boards, features and peripherals – built once, installed on any number of devices. */
+export const firmware = sqliteTable(
+	'firmware',
+	{
+		id: id(),
+		ownerId: text('owner_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		kind: text('kind').$type<DeviceKind>().notNull(),
+		config: text('config', { mode: 'json' }).$type<FirmwareConfig>().notNull(),
+		/** Next build number (builds count up). */
+		nextVersion: integer('next_version').notNull().default(1),
+		createdAt,
+		updatedAt: updatedAt()
+	},
+	(t) => [index('firmware_owner_idx').on(t.ownerId)]
+);
+
+/** A board running a firmware; what is its own (identity, per-device values) is in `settings`. */
+export const device = sqliteTable(
+	'device',
+	{
+		id: id(),
+		ownerId: text('owner_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		/** The app refuses to delete a firmware with devices (cascade: deleting its owner works). */
+		firmwareId: text('firmware_id')
+			.notNull()
+			.references(() => firmware.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		/** The firmware's kind, kept here for queries (hubs of a location). */
+		kind: text('kind').$type<DeviceKind>().notNull(),
+		/** Where it lives; null: no location. */
+		locationId: text('location_id').references(() => location.id, { onDelete: 'set null' }),
+		settings: text('settings', { mode: 'json' }).$type<DeviceSettings>().notNull(),
+		/** Bearer token of the device: its REST API, update pulls and reports. */
+		apiToken: text('api_token').notNull(),
+		/** After rotating: the token the board still has, until it runs the new configuration. */
+		previousToken: text('previous_token'),
+		/** Hub that relays updates (Thread devices). */
+		hubId: text('hub_id').references((): AnySQLiteColumn => device.id, { onDelete: 'set null' }),
+		/**
+		 * Its own hostname below the device domain (`matterhub` → matterhub.espmatter.app), where the
+		 * app passes requests on to it through its tunnel (remote-access feature). Unique across all users.
+		 */
+		subdomain: text('subdomain'),
+		lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }),
+		reported: text('reported', { mode: 'json' })
+			.$type<Record<string, SlotReport>>()
+			.notNull()
+			.default({}),
+		createdAt,
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		index('device_owner_idx').on(t.ownerId),
+		index('device_firmware_idx').on(t.firmwareId),
+		uniqueIndex('device_subdomain_idx').on(t.subdomain)
+	]
+);
+
 export const build = sqliteTable(
 	'build',
 	{
-		id: text('id')
-			.primaryKey()
-			.$defaultFn(() => crypto.randomUUID()),
-		projectId: text('project_id').references(() => project.id, { onDelete: 'set null' }),
+		id: id(),
+		firmwareId: text('firmware_id')
+			.notNull()
+			.references(() => firmware.id, { onDelete: 'cascade' }),
 		userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
-		configHash: text('config_hash').notNull(),
-		config: text('config', { mode: 'json' }).$type<ProjectConfig>().notNull(),
+		version: integer('version').notNull(),
 		status: text('status').$type<BuildStatus>().notNull().default('queued'),
-		roles: text('roles', { mode: 'json' }).$type<Record<string, RoleBuildState>>().notNull(),
+		config: text('config', { mode: 'json' }).$type<FirmwareConfig>().notNull(),
+		slots: text('slots', { mode: 'json' })
+			.$type<Record<string, SlotArtifacts>>()
+			.notNull()
+			.default({}),
+		/** Slot currently compiling. */
+		step: text('step'),
 		error: text('error'),
+		runnerId: text('runner_id'),
+		createdAt,
 		startedAt: integer('started_at', { mode: 'timestamp_ms' }),
-		finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
-		...timestamps
+		finishedAt: integer('finished_at', { mode: 'timestamp_ms' })
 	},
-	(t) => [index('build_project_idx').on(t.projectId), index('build_hash_idx').on(t.configHash)]
+	(t) => [index('build_firmware_idx').on(t.firmwareId)]
 );
 
-export const DEVICE_UPDATE_STATES = [
-	'requested',
-	'downloading',
-	'installing',
-	'done',
-	'failed'
-] as const;
-export type DeviceUpdateState = (typeof DEVICE_UPDATE_STATES)[number];
-
-/**
- * A build an owner wants on a chip of their device, and how far it got: the device (`app_updates`) or its
- * hub (`matter_updates`) asks for it and reports back (see `server/updates.ts`). One per chip.
- */
-export const deviceUpdate = sqliteTable(
-	'device_update',
+/** Getting a build onto a slot of a device. */
+export const deployment = sqliteTable(
+	'deployment',
 	{
-		projectId: text('project_id')
+		id: id(),
+		deviceId: text('device_id')
 			.notNull()
-			.references(() => project.id, { onDelete: 'cascade' }),
-		role: text('role').notNull(),
+			.references(() => device.id, { onDelete: 'cascade' }),
 		buildId: text('build_id')
 			.notNull()
 			.references(() => build.id, { onDelete: 'cascade' }),
-		/** Software version of the build (`BuildInfo.version`). */
+		slot: text('slot').notNull(),
 		version: integer('version').notNull(),
-		state: text('state').$type<DeviceUpdateState>().notNull().default('requested'),
+		method: text('method').$type<DeployMethod>().notNull(),
+		state: text('state').$type<DeployState>().notNull().default('pending'),
 		message: text('message'),
-		...timestamps
+		createdAt,
+		updatedAt: updatedAt()
 	},
-	(t) => [primaryKey({ columns: [t.projectId, t.role] })]
+	(t) => [index('deployment_device_idx').on(t.deviceId, t.slot)]
 );
 
-/** How a worker is reached, and what that needs (`worker.config`). */
-export interface WorkerConfigs {
-	/** idf-worker.py at `url`, e.g. the `idf` compose service; it shares DATA_DIR with this server. */
-	'idf-docker': { url: string; maxWorkspaces: number };
-	/** ESP-IDF at `idfPath` on this server. */
-	'idf-local': {
-		idfPath: string;
-		/** Python the ESP-IDF was installed with, if not `python3` on PATH. */
-		idfPython?: string;
-		maxWorkspaces: number;
-	};
+export type RunnerKind = 'local' | 'docker';
+
+export interface RunnerConfig {
+	/** local: ESP-IDF checkout. */
+	idfPath?: string;
+	/** docker: image, e.g. `espressif/idf:v5.4.2`. */
+	image?: string;
+	/** Parallel builds on this runner. */
+	concurrency: number;
 }
-export type WorkerKind = keyof WorkerConfigs;
 
-/**
- * A machine that runs jobs (e.g. firmware builds) for this server, set up by an admin (/admin).
- * Everything that depends on the `kind` lives in `config`, so new kinds need no migration.
- */
-export const worker = sqliteTable('worker', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => crypto.randomUUID()),
+/** Where firmware is compiled, set up by an admin. */
+export const runner = sqliteTable('runner', {
+	id: id(),
 	name: text('name').notNull(),
+	kind: text('kind').$type<RunnerKind>().notNull(),
+	config: text('config', { mode: 'json' }).$type<RunnerConfig>().notNull(),
 	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-	kind: text('kind').$type<WorkerKind>().notNull(),
-	config: text('config', { mode: 'json' }).$type<WorkerConfigs[WorkerKind]>().notNull(),
-	...timestamps
+	createdAt
 });
-
-/** A `worker` row with `config` narrowed by `kind`. */
-export type Worker = Omit<typeof worker.$inferSelect, 'kind' | 'config'> &
-	{ [K in WorkerKind]: { kind: K; config: WorkerConfigs[K] } }[WorkerKind];
-
-/** Server-wide settings an admin can change, one row per key (see `server/settings.ts`). */
-export const setting = sqliteTable('setting', {
-	key: text('key').primaryKey(),
-	value: text('value', { mode: 'json' }).notNull(),
-	...timestamps
-});
-
-export * from './auth.schema';

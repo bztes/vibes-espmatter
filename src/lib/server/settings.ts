@@ -1,11 +1,13 @@
 import { eq } from 'drizzle-orm';
-import { db } from '#lib/server/db/index.ts';
-import { setting } from '#lib/server/db/schema.ts';
+import { db } from './db/index.ts';
+import { setting } from './db/schema.ts';
 
 /** Every setting with its default, used until an admin changes it. */
 const defaults = {
-	/** Anyone can create an account (always possible while there is no admin). */
-	signUpEnabled: false
+	/** Anyone can create an account (always possible while there is no user). */
+	signUpEnabled: false,
+	/** URL devices use to reach the app (default: the origin a build was started from). */
+	publicUrl: ''
 };
 
 export type Settings = typeof defaults;

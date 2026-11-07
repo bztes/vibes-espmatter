@@ -1,11 +1,14 @@
+import { mkdirSync } from 'node:fs';
 import { defineConfig } from 'drizzle-kit';
-import { databasePath } from './src/lib/server/db/path';
+
+const dataDir = process.env.DATA_DIR ?? './data';
+mkdirSync(dataDir, { recursive: true });
 
 export default defineConfig({
 	schema: './src/lib/server/db/schema.ts',
 	out: './drizzle',
 	dialect: 'sqlite',
-	dbCredentials: { url: `file:${databasePath(process.env.DATA_DIR || './data')}` },
+	dbCredentials: { url: `file:${dataDir}/app.db` },
 	verbose: true,
 	strict: true
 });

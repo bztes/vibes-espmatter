@@ -1,5 +1,17 @@
-/* The website's styles: Tailwind (without preflight) and the theme shared with the device UI. */
-@layer theme, base, components, utilities;
-@import 'tailwindcss/theme.css' layer(theme);
-@import 'tailwindcss/utilities.css' layer(utilities);
-@import './lib/device/device-ui/theme.css';
+@import 'tailwindcss';
+@import './lib/sdk/device-ui/theme.css';
+
+@source '../plugins';
+
+@layer base {
+	html {
+		background: var(--color-bg);
+		color: var(--color-fg);
+	}
+	a {
+		color: var(--color-accent);
+	}
+	::selection {
+		background: color-mix(in oklch, var(--color-accent) 25%, transparent);
+	}
+}
