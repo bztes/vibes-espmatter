@@ -421,7 +421,7 @@ export default defineFeature({
 					path: '/api/v1/controller/automations',
 					summary: 'Add an automation',
 					description:
-						'Any account, for buttons it may read and endpoints and scenes it may control. Triggers: `button` (`node`, `endpoint`, `gesture`: `press`, `double`, `hold`), `time` (`minute` of the day, local time; `days`: bit 0 = Sunday … bit 6 = Saturday) or `once` (`at`: Unix time, or `in`: minutes from now by the hub’s clock – runs once, then is disabled). Actions (1–4): `endpoint` with `command` `toggle`, `on`, `off`, `level` (with `level` 1–254), `brighter`, `darker`, `warmer`, `cooler`, or – with the `hold` gesture only, until released – `dim_up`, `dim_down`, `warmer_hold`, `cooler_hold`; `scene` (`scene`, `command`: `activate`, `deactivate`). Times missed while the hub was off are skipped. Up to 32 automations.',
+						'Any account, for buttons it may read and endpoints and scenes it may control. Triggers: `button` (`node`, `endpoint`, `gesture`: `press`, `double`, `hold`), `time` (`minute` of the day, local time; `days`: bit 0 = Sunday … bit 6 = Saturday) or `once` (`at`: Unix time, or `in`: minutes from now by the hub’s clock – runs once, then is disabled). Actions (1–4): `endpoint` with `command` `toggle`, `on`, `off`, `level` (with `level` 1–254), `brighter`, `darker`, `warmer`, `cooler`, or – with the `hold` gesture only, until released – `dim_up`, `dim_down`, `warmer_hold`, `cooler_hold`; `scene` (`scene`, `command`: `activate`). Times missed while the hub was off are skipped. Up to 32 automations.',
 					auth: 'token',
 					params: [
 						{ name: 'name', type: 'string', description: 'Up to 31 characters', in: 'body' },
@@ -471,7 +471,7 @@ export default defineFeature({
 					path: '/api/v1/controller/scenes',
 					summary: 'Scenes',
 					description:
-						'Any account: its own scenes and those granted to it (`s<id>`); admins see all. `access`: `read` (run only) or `write` (also change and delete). A member sets an endpoint `on` or off, optionally with `level` (1–254) and `colorTemperature` (mireds). `active`: activated and not deactivated since (forgotten at a restart).',
+						'Any account: its own scenes and those granted to it (`s<id>`); admins see all. `access`: `read` (run only) or `write` (also change and delete). A member sets an endpoint `on` or off, optionally with `level` (1–254) and `colorTemperature` (mireds). `active`: all members are as the scene sets them.',
 					auth: 'token',
 					response: {
 						max: 16,
@@ -528,8 +528,7 @@ export default defineFeature({
 				{
 					method: 'POST',
 					path: '/api/v1/controller/scenes/*',
-					summary:
-						'Activate or deactivate a scene (`/api/v1/controller/scenes/<id>/activate`, `…/deactivate`)',
+					summary: 'Activate a scene (`/api/v1/controller/scenes/<id>/activate`)',
 					description:
 						'Its owner, an admin or an account with access, with the caller’s access: `skipped` endpoints it may not control. Activating remembers how the endpoints were; deactivating sets that back, or turns them off when it isn’t known.',
 					auth: 'token',

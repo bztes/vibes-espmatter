@@ -15,7 +15,6 @@ export interface Draft {
 	/** Undefined: the command's suggestion. */
 	pickedArg?: number;
 	scene: string;
-	sceneCommand: 'activate' | 'deactivate';
 }
 
 let next = 0;
@@ -32,8 +31,7 @@ export function draftOf(a: Action | undefined, lists: Lists): Draft {
 		target: toEp ? `${a.node}:${a.endpoint}` : '',
 		picked: p?.id ?? (a?.type === 'endpoint' ? a.command : 'on'),
 		pickedArg: p?.arg,
-		scene: a?.type === 'scene' ? String(a.scene) : '',
-		sceneCommand: a?.type === 'scene' ? a.command : 'activate'
+		scene: a?.type === 'scene' ? String(a.scene) : ''
 	};
 }
 
@@ -54,9 +52,7 @@ export function resolve(d: Draft, lists: Lists, held: boolean): Resolved {
 		return {
 			available: [],
 			command: '',
-			action: d.scene
-				? { type: 'scene', scene: Number(d.scene), command: d.sceneCommand }
-				: undefined
+			action: d.scene ? { type: 'scene', scene: Number(d.scene), command: 'activate' } : undefined
 		};
 	const ep = lists.targets.find((t) => t.key === d.target)?.ep;
 	const available = ep

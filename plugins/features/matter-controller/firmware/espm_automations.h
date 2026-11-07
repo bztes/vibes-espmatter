@@ -13,8 +13,8 @@ int espm_auto_caller();
 espm_perm_t espm_scene_access(int user, uint16_t id);
 /** `user` may see and run the scene. Stack lock held. */
 bool espm_scene_usable(int user, uint16_t id);
-/** Activate or deactivate with `user`'s access: returns the endpoints skipped, -1 no such scene. Stack lock held. */
-int espm_scene_run(uint16_t id, bool activate, int user);
+/** Activate with `user`'s access: returns the endpoints skipped, -1 no such scene. Stack lock held. */
+int espm_scene_run(uint16_t id, int user);
 /** Stack lock held. */
 void espm_scenes_node_removed(uint64_t node);
 void espm_scenes_start();

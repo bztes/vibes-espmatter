@@ -37,7 +37,7 @@ export type Action =
 	| { type: 'endpoint'; node: number; endpoint: number; command: string; level?: number }
 	| (Request & { type: 'invoke'; command: number; data?: Record<string, number> })
 	| (Request & { type: 'write'; attribute: number; valueType: string; value: number | boolean })
-	| { type: 'scene'; scene: number; command: 'activate' | 'deactivate' }
+	| { type: 'scene'; scene: number; command: 'activate' }
 	| { type: 'unknown' };
 
 /** Commands the hub runs while a button is held, and stops on release. */

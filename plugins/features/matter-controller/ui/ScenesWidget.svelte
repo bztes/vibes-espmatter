@@ -1,7 +1,7 @@
 <!--
   Scenes of the account and those granted to it (admins: everyone's), set by the hub (espm_scenes.cpp): how several
-  endpoints should be, applied at once. One button each to activate or deactivate it; made and
-  edited in a dialog. New members start from the endpoint's current state.
+  endpoints should be, applied at once. One button each to activate it, highlighted while the
+  devices are as it sets them; made and edited in a dialog. New members start from the endpoint's current state.
 -->
 <script lang="ts">
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -134,9 +134,9 @@
 			open = false;
 		}, `${scene.name} deleted.`);
 
-	const toggle = (scene: Scene) =>
+	const activate = (scene: Scene) =>
 		run(async () => {
-			const skipped = await runScene(scene.id, !scene.active);
+			const skipped = await runScene(scene.id);
 			if (skipped)
 				status = { tone: 'info', text: `${skipped} device(s) skipped: you may not control them.` };
 		});
@@ -167,12 +167,12 @@
 							type="button"
 							aria-pressed={scene.active}
 							disabled={busy || !scene.members.length}
-							title={scene.active ? 'Deactivate (back to before)' : 'Activate'}
+							title={scene.active ? 'Active: the devices are as it sets them' : 'Activate'}
 							class={[
 								'flex items-center gap-1.5 pr-2 pl-4 disabled:opacity-50',
 								scene.active ? 'hover:bg-accent/90' : 'hover:bg-surface-2'
 							]}
-							onclick={() => toggle(scene)}
+							onclick={() => activate(scene)}
 						>
 							{scene.name}
 							{#if !scene.mine}<span class="text-xs opacity-70">· {scene.owner}</span>{/if}

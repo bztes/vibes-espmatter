@@ -51,7 +51,6 @@ enum : uint8_t {
     CMD_COOLER_HOLD, // while held
     CMD_LEVEL,       // to `value`
     CMD_ACTIVATE,    // scenes
-    CMD_DEACTIVATE,
 };
 
 struct Trigger {
@@ -115,7 +114,7 @@ static const Named ENDPOINT_CMDS[] = {
     {CMD_COOLER, "cooler"},         {CMD_DIM_UP, "dim_up"},   {CMD_DIM_DOWN, "dim_down"},
     {CMD_WARMER_HOLD, "warmer_hold"}, {CMD_COOLER_HOLD, "cooler_hold"}, {CMD_LEVEL, "level"},
 };
-static const Named SCENE_CMDS[] = {{CMD_ACTIVATE, "activate"}, {CMD_DEACTIVATE, "deactivate"}};
+static const Named SCENE_CMDS[] = {{CMD_ACTIVATE, "activate"}};
 
 template <size_t N> static const char *name_of(const Named (&list)[N], uint8_t id)
 {
@@ -183,7 +182,9 @@ static const char *action_problem(int owner, const Action &a)
     case A_INVOKE:
     case A_WRITE:
         return espm_auto_allowed(owner, a.node, a.ep, ESPM_PERM_WRITE) ? nullptr : "no access to the device any more";
-    case A_SCENE: return espm_scene_usable(owner, a.scene) ? nullptr : "the scene is gone or no longer shared";
+    case A_SCENE:
+        if (!a.command) return "scenes can no longer be deactivated";
+        return espm_scene_usable(owner, a.scene) ? nullptr : "the scene is gone or no longer shared";
     default: return "made by a newer firmware";
     }
 }
@@ -424,7 +425,8 @@ static const char *parse_action(cJSON *o, Action &a, bool strict)
         if (!get_uint(o, "scene", 0xFFFF, n)) return "a scene action needs scene";
         a.scene = n;
         a.command = id_of(SCENE_CMDS, cmd);
-        return a.command ? nullptr : "command: activate or deactivate";
+        // Stored ones from before (deactivate) are kept, and reported.
+        return a.command || !strict ? nullptr : "command: activate";
     case A_INVOKE:
     case A_WRITE: return parse_request(o, a);
     default: return strict ? "action type: endpoint, invoke, write or scene" : nullptr;
@@ -635,7 +637,7 @@ static void run(const Rule &r, bool release = false)
         } else if ((a.type == A_INVOKE || a.type == A_WRITE) && !release) {
             run_request(a);
         } else if (a.type == A_SCENE && !release) {
-            espm_scene_run(a.scene, a.command == CMD_ACTIVATE, r.owner);
+            espm_scene_run(a.scene, r.owner);
         }
     }
 }

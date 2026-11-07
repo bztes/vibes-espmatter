@@ -123,17 +123,5 @@
 			groups={sceneGroups}
 			onchange={({ currentTarget: { value: v } }) => (draft.scene = v)}
 		/>
-		{#if draft.scene}
-			<Segmented
-				label="Scene command"
-				bind:value={
-					() => draft.sceneCommand, (v) => (draft.sceneCommand = v as Draft['sceneCommand'])
-				}
-				options={[
-					{ value: 'activate', label: 'Activate' },
-					{ value: 'deactivate', label: 'Back to before' }
-				]}
-			/>
-		{/if}
 	{/if}
 </div>

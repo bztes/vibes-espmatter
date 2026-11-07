@@ -1,6 +1,6 @@
 // espmatter studio – scenes: named states of several endpoints ("Movie night"), set at once from
-// the dashboard or by automations. Activating remembers how the endpoints were (in RAM), and
-// deactivating puts that back – or turns them off when it isn't known (e.g. after a restart).
+// the dashboard or by automations. Activate only, like Matter's RecallScene; a scene counts as
+// active while all its members are as it sets them.
 //
 // Every account makes its own; owner and admins see, run and edit it, others per grant on `s<id>`
 // (read: see and run, write: also edit). A scene runs with the access of whoever runs it, skipping
@@ -39,20 +39,11 @@ struct Member {
     uint16_t mireds; // 0: leave it
 };
 
-/** How a member was before the scene; 0 / -1: unknown. */
-struct Before {
-    int8_t on;
-    uint8_t level;
-    uint16_t mireds;
-};
-
 struct Scene {
     uint16_t id;
     int owner;
     char name[NAME_LEN];
     std::vector<Member> members;
-    bool active;
-    std::vector<Before> before;
 };
 
 static std::vector<Scene> s_scenes;
@@ -234,10 +225,7 @@ void espm_scenes_node_removed(uint64_t node)
         auto before = s.members.size();
         s.members.erase(std::remove_if(s.members.begin(), s.members.end(), [&](const Member &m) { return m.node == node; }),
                         s.members.end());
-        if (s.members.size() == before) continue;
-        s.active = false;
-        s.before.clear();
-        save(s);
+        if (s.members.size() != before) save(s);
     }
 }
 
@@ -253,41 +241,46 @@ static void send(const Member &m, uint32_t cluster, uint32_t command, const char
                  (unsigned long)command, (unsigned long long)m.node, m.ep, esp_err_to_name(err));
 }
 
-/** Bring the endpoint to `on`, `level` and `mireds` (0: leave). */
-static void apply(const Member &m, bool on, uint8_t level, uint16_t mireds)
+/** Bring the endpoint to how the member sets it. */
+static void apply(const Member &m)
 {
     char data[80];
-    if (!on) return send(m, OnOff::Id, OnOff::Commands::Off::Id);
+    if (!m.on) return send(m, OnOff::Id, OnOff::Commands::Off::Id);
     // ExecuteIfOff, so the color is right when the light comes on.
-    if (mireds) {
-        snprintf(data, sizeof(data), "{\"0:U16\":%u,\"1:U16\":%d,\"2:U8\":1,\"3:U8\":1}", mireds, TRANSITION);
+    if (m.mireds) {
+        snprintf(data, sizeof(data), "{\"0:U16\":%u,\"1:U16\":%d,\"2:U8\":1,\"3:U8\":1}", m.mireds, TRANSITION);
         send(m, ColorControl::Id, ColorControl::Commands::MoveToColorTemperature::Id, data);
     }
-    if (level) {
-        snprintf(data, sizeof(data), "{\"0:U8\":%u,\"1:U16\":%d,\"2:U8\":0,\"3:U8\":0}", level, TRANSITION);
+    if (m.level) {
+        snprintf(data, sizeof(data), "{\"0:U8\":%u,\"1:U16\":%d,\"2:U8\":0,\"3:U8\":0}", m.level, TRANSITION);
         send(m, LevelControl::Id, LevelControl::Commands::MoveToLevelWithOnOff::Id, data);
     } else {
         send(m, OnOff::Id, OnOff::Commands::On::Id);
     }
 }
 
-static Before current(const Member &m)
+/** The endpoint is as the member sets it (unknown: not). */
+static bool matches(const Member &m)
 {
-    Before b = {-1, 0, 0};
     float v;
-    if (espm_controller_value(m.node, m.ep, "on", &v)) b.on = v != 0;
-    if (espm_controller_value(m.node, m.ep, "level", &v) && v >= 1) b.level = (uint8_t)lroundf(v);
-    if (espm_controller_value(m.node, m.ep, "colorTemperature", &v) && v >= 1) b.mireds = (uint16_t)lroundf(v);
-    return b;
+    if (!espm_controller_value(m.node, m.ep, "on", &v) || (v != 0) != m.on) return false;
+    if (!m.on) return true;
+    // Some slack: devices round levels and mireds.
+    if (m.level && (!espm_controller_value(m.node, m.ep, "level", &v) || fabsf(v - m.level) > 3)) return false;
+    if (m.mireds && (!espm_controller_value(m.node, m.ep, "colorTemperature", &v) || fabsf(v - m.mireds) > 5))
+        return false;
+    return true;
 }
 
-int espm_scene_run(uint16_t id, bool activate, int user)
+static bool is_active(const Scene &s)
+{
+    return !s.members.empty() && std::all_of(s.members.begin(), s.members.end(), matches);
+}
+
+int espm_scene_run(uint16_t id, int user)
 {
     Scene *s = find(id);
     if (!s || !espm_scene_usable(user, id)) return -1;
-    // Activating an active scene again keeps what was before it.
-    const bool remember = activate && !s->active;
-    if (remember) s->before.assign(s->members.size(), Before{-1, 0, 0});
     int skipped = 0;
     for (size_t i = 0; i < s->members.size(); i++) {
         const Member &m = s->members[i];
@@ -295,18 +288,9 @@ int espm_scene_run(uint16_t id, bool activate, int user)
             skipped++;
             continue;
         }
-        if (activate) {
-            if (remember) s->before[i] = current(m);
-            apply(m, m.on, m.level, m.mireds);
-        } else {
-            const Before b = s->active && i < s->before.size() ? s->before[i] : Before{-1, 0, 0};
-            // Only what the scene changed; unknown: off.
-            apply(m, b.on == 1, m.level ? b.level : 0, m.mireds ? b.mireds : 0);
-        }
+        apply(m);
     }
-    s->active = activate;
-    if (!activate) s->before.clear();
-    ESP_LOGI(TAG, "Scene %u %s (%d endpoints skipped)", id, activate ? "activated" : "deactivated", skipped);
+    ESP_LOGI(TAG, "Scene %u activated (%d endpoints skipped)", id, skipped);
     return skipped;
 }
 
@@ -341,7 +325,7 @@ static esp_err_t list(httpd_req_t *req)
 #endif
             cJSON_AddBoolToObject(o, "mine", s.owner == me);
             cJSON_AddStringToObject(o, "access", access == ESPM_PERM_WRITE ? "write" : "read");
-            cJSON_AddBoolToObject(o, "active", s.active);
+            cJSON_AddBoolToObject(o, "active", is_active(s));
             cJSON_AddItemToArray(scenes, o);
         }
     });
@@ -424,8 +408,6 @@ static esp_err_t change(httpd_req_t *req)
                 status = 403;
                 return;
             }
-            changed.active = false; // what was before no longer matches the members
-            changed.before.clear();
         }
         if (!save(changed)) {
             status = 500;
@@ -438,16 +420,14 @@ static esp_err_t change(httpd_req_t *req)
     return err ? espm_send_error(req, status, err) : espm_send_ok(req);
 }
 
-/** POST /api/v1/controller/scenes/<id>/activate or …/deactivate */
+/** POST /api/v1/controller/scenes/<id>/activate */
 static esp_err_t run(httpd_req_t *req)
 {
-    const char *verb = strrchr(req->uri, '/') + 1;
-    bool activate = !strcmp(verb, "activate");
-    if (!activate && strcmp(verb, "deactivate")) return espm_send_error(req, 404, "activate or deactivate");
+    if (strcmp(strrchr(req->uri, '/') + 1, "activate")) return espm_send_error(req, 404, "activate");
     const int me = espm_auto_caller();
     int skipped = espm_locked([&] {
         Scene *s = find_visible(req, ESPM_PERM_READ);
-        return s ? espm_scene_run(s->id, activate, me) : -1;
+        return s ? espm_scene_run(s->id, me) : -1;
     });
     if (skipped < 0) return espm_send_error(req, 404, "no such scene");
     cJSON *json = cJSON_CreateObject();

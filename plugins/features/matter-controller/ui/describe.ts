@@ -83,7 +83,7 @@ export function whenText(t: Trigger, lists: Lists, now?: number) {
 export function actionText(a: Action, lists: Lists) {
 	if (a.type === 'scene') {
 		const s = lists.scenes.find((x) => x.id === a.scene)?.name ?? `scene ${a.scene}`;
-		return `${s}: ${a.command}`;
+		return `${s}: activate`;
 	}
 	if (a.type === 'endpoint' || a.type === 'invoke' || a.type === 'write') {
 		const device = endpointName(lists.targets, a.node, a.endpoint);
