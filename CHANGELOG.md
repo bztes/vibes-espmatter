@@ -1,5 +1,17 @@
 # vibes-espmatter
 
+## 0.3.0
+
+### Minor Changes
+
+- [`00291f1`](https://github.com/bztes/vibes-espmatter/commit/00291f1ebdc7132f2dcb830f97043aed26df5e3d) Thanks [@bztes](https://github.com/bztes)! - The project is rebuilt as ESPMatter Studio: firmwares are built once and set up per device, devices update over the air from the app.
+
+- [`70904b6`](https://github.com/bztes/vibes-espmatter/commit/70904b62901e18487315725e997baa67d7fe46d7) Thanks [@bztes](https://github.com/bztes)! - New History feature: charts that show how values such as temperature changed over time, for the Matter hub and its connected devices.
+
+- [`d839239`](https://github.com/bztes/vibes-espmatter/commit/d839239e45735aad2db51437bd350dc060457ad2) Thanks [@bztes](https://github.com/bztes)! - Firmware is built by runners that connect to the app with a token and may run on any machine, even behind NAT. The app no longer needs the Docker socket; existing runners must be added again.
+
+- [`d968b0c`](https://github.com/bztes/vibes-espmatter/commit/d968b0c9a294619d3c11853473c3ab9a2fb996a3) Thanks [@bztes](https://github.com/bztes)! - Scenes can only be activated, and show as active while their devices are as the scene sets them. Deactivating ("back to before") is removed.
+
 ## 0.2.1
 
 ### Patch Changes
