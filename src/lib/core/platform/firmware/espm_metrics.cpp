@@ -1,8 +1,11 @@
 // espmatter studio – metric registry (GET /api/v1/metrics). Peripherals set values, exporters read them.
 #include "espm.h"
 
+#include <stdlib.h>
 #include <string.h>
+#include <esp_heap_caps.h>
 #include <esp_timer.h>
+#include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 
 #define MAX_METRICS 32
@@ -60,6 +63,25 @@ void espm_metrics_remote_report(int index, const espm_metric_sink_t *sink)
         if (index < n) return s_sources[i]->report(index, sink);
         index -= n;
     }
+}
+
+void espm_metrics_own_report(const espm_metric_sink_t *sink)
+{
+    void *a = sink->arg;
+    sink->device(a, ESPM_DEVICE_ID, ESPM_DEVICE_NAME, nullptr);
+    sink->metric(a, "device.uptime", "", "s", esp_timer_get_time() / 1e6);
+    sink->metric(a, "device.memory.free", "", "By", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    sink->metric(a, "device.memory.min_free", "", "By", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+#if CONFIG_ESP_WIFI_ENABLED
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) sink->metric(a, "device.wifi.rssi", "", "dBm", ap.rssi);
+#endif
+    // On the heap: called from several tasks, and only now and then.
+    auto *snap = (espm_metric_t *)malloc(sizeof(espm_metric_t) * MAX_METRICS);
+    if (!snap) return;
+    int n = espm_metrics_snapshot(snap, MAX_METRICS);
+    for (int i = 0; i < n; i++) sink->metric(a, snap[i].name, snap[i].labels, snap[i].unit, snap[i].value);
+    free(snap);
 }
 
 #if ESPM_HTTP

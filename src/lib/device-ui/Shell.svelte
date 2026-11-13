@@ -1,6 +1,6 @@
 <!--
   The device web interface: login, pages (hash routing) and the widget grid. The header links the
-  pages; the user menu has those marked `menu` (the admin page), the own password, logging out. `#/` is the dashboard (the page with
+  pages (on phones the user menu does); the user menu has those marked `menu` (the admin page), the own password, logging out. `#/` is the dashboard (the page with
   path `/`); a page whose widgets have several tabs shows a tab bar (`#/admin/<tab>`). Hub accounts
   change their own password here; with a generated one (new account, reset) they must first.
 -->
@@ -20,7 +20,7 @@
 		setToken
 	} from '#sdk/device-ui';
 	import Card from './Card.svelte';
-	import type { ShellProps } from './types';
+	import type { ShellPage, ShellProps } from './types';
 
 	let { device, pages, widgets, preview = false }: ShellProps = $props();
 
@@ -174,6 +174,31 @@
 	}
 </script>
 
+<!-- A page link of the header, or (`inMenu`) of the user menu. -->
+{#snippet pageLink(page: ShellPage, inMenu: boolean)}
+	{@const here = page === current}
+	<a
+		role={inMenu ? 'menuitem' : undefined}
+		href="#{page.path}"
+		aria-current={here ? 'page' : undefined}
+		class={[
+			'flex items-center text-sm no-underline',
+			inMenu
+				? 'gap-2 rounded-md px-2.5 py-2'
+				: 'h-9 gap-1.5 rounded-lg px-2.5 font-medium whitespace-nowrap',
+			here
+				? 'bg-accent-soft text-accent'
+				: inMenu
+					? 'text-fg hover:bg-surface-2'
+					: 'text-muted hover:bg-surface-2 hover:text-fg'
+		]}
+		onclick={inMenu ? () => (menuOpen = false) : undefined}
+	>
+		{#if page.icon}<page.icon size={16} class={inMenu && !here ? 'text-muted' : ''} />{/if}
+		{page.title}
+	</a>
+{/snippet}
+
 <svelte:window
 	onclick={closeMenuOutside}
 	onkeydown={(e) => e.key === 'Escape' && (menuOpen = false)}
@@ -187,27 +212,11 @@
 					class="grid size-7 place-items-center rounded-lg bg-accent text-sm font-bold text-accent-fg"
 					>{name.slice(0, 1).toUpperCase()}</span
 				>
-				<span class={['truncate font-semibold', navPages.length > 1 && 'max-sm:hidden']}
-					>{name}</span
-				>
+				<span class="truncate font-semibold">{name}</span>
 			</a>
 			{#if authed && !changing && navPages.length > 1}
-				<nav class="flex min-w-0 gap-0.5 overflow-x-auto" aria-label="Pages">
-					{#each navPages as page (page.id)}
-						<a
-							href="#{page.path}"
-							aria-current={page === current ? 'page' : undefined}
-							class={[
-								'flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium whitespace-nowrap no-underline',
-								page === current
-									? 'bg-accent-soft text-accent'
-									: 'text-muted hover:bg-surface-2 hover:text-fg'
-							]}
-						>
-							{#if page.icon}<page.icon size={16} />{/if}
-							{page.title}
-						</a>
-					{/each}
+				<nav class="flex min-w-0 gap-0.5 overflow-x-auto max-sm:hidden" aria-label="Pages">
+					{#each navPages as page (page.id)}{@render pageLink(page, false)}{/each}
 				</nav>
 			{/if}
 			{#if authed}
@@ -236,16 +245,14 @@
 								{#if accounts}· {session.admin ? 'admin' : 'user'}{/if}
 							</div>
 							{#if !changing}
+								{#if navPages.length > 1}
+									<!-- On phones the header has no room for the pages: they move in here. -->
+									<div class="grid gap-0.5 border-b border-border pb-1 sm:hidden">
+										{#each navPages as page (page.id)}{@render pageLink(page, true)}{/each}
+									</div>
+								{/if}
 								{#each menuPages.filter((p) => p !== current) as page (page.id)}
-									<a
-										role="menuitem"
-										href="#{page.path}"
-										class="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-fg no-underline hover:bg-surface-2"
-										onclick={() => (menuOpen = false)}
-									>
-										{#if page.icon}<page.icon size={16} class="text-muted" />{/if}
-										{page.title}
-									</a>
+									{@render pageLink(page, true)}
 								{/each}
 								{#if ownPassword}
 									<button

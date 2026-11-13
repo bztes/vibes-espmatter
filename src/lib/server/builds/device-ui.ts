@@ -25,6 +25,7 @@ export interface UiSpec {
 		props: Record<string, unknown>;
 		module: string;
 	}[];
+	spotItems: { spot: string; module: string }[];
 }
 
 export function uiSpec(a: Assembly): UiSpec {
@@ -40,12 +41,16 @@ export function uiSpec(a: Assembly): UiSpec {
 			access: w.access,
 			props: w.props ?? {},
 			module: `${w.dir}/ui/${w.file}`
-		}))
+		})),
+		spotItems: a.spotItems.map((x) => ({ spot: x.spot, module: `${x.dir}/ui/${x.file}` }))
 	};
 }
 
+/** Every component the plugins contribute: widgets and spot items. */
+const parts = (spec: UiSpec) => [...spec.widgets, ...spec.spotItems];
+
 function entry(spec: UiSpec): string {
-	const modules = [...new Set(spec.widgets.map((w) => w.module))];
+	const modules = [...new Set(parts(spec).map((p) => p.module))];
 	const icons = [...new Set(spec.pages.flatMap((p) => (p.icon ? [p.icon] : [])))].filter((i) =>
 		/^[a-z0-9-]+$/.test(i)
 	);
@@ -55,8 +60,13 @@ function entry(spec: UiSpec): string {
 import { mount } from 'svelte';
 import './main.css';
 import Shell from './src/lib/device-ui/Shell.svelte';
+import { registerSpotItems } from './src/lib/sdk/device-ui/index.ts';
 ${modules.map((m) => `import ${mod(m)} from './${m}';`).join('\n')}
 ${icons.map((i) => `import ${icon(i)} from '@lucide/svelte/icons/${i}';`).join('\n')}
+
+registerSpotItems([
+${spec.spotItems.map(({ module, spot }) => `\t{ spot: ${JSON.stringify(spot)}, component: ${mod(module)} }`).join(',\n')}
+]);
 
 mount(Shell, {
 	target: document.getElementById('app'),
@@ -75,7 +85,7 @@ const css = (spec: UiSpec, tailwindDir: string) => {
 	const dirs = new Set([
 		'src/lib/device-ui',
 		'src/lib/sdk/device-ui',
-		...spec.widgets.map((w) => path.posix.dirname(w.module))
+		...parts(spec).map((p) => path.posix.dirname(p.module))
 	]);
 	return `@layer theme, base, components, utilities;
 @import '${tailwindDir}/theme.css' layer(theme);
@@ -141,8 +151,8 @@ export async function buildDeviceUi(
 			Object.entries(uiSources).map(async ([file, load]) => [file.slice(1), await load()] as const)
 		)
 	);
-	for (const w of spec.widgets)
-		if (!(w.module in sources)) throw new Error(`Widget not found: ${w.module}`);
+	for (const p of parts(spec))
+		if (!(p.module in sources)) throw new Error(`UI module not found: ${p.module}`);
 
 	const nodeModules = path.resolve('node_modules');
 	const tailwindDir = await fs.realpath(path.join(nodeModules, 'tailwindcss'));

@@ -12,6 +12,7 @@ import type {
 	SettingValue,
 	DefineValue,
 	UiPage,
+	UiSpotItem,
 	UiWidget,
 	Wire
 } from '#sdk';
@@ -32,16 +33,19 @@ export interface SlotFirmware extends Omit<FirmwareContribution, 'sources'> {
 	blocks: string[];
 }
 
-export interface PlacedWidget extends UiWidget {
-	dir: string;
-	by: string;
-}
+/** A UI contribution with the plugin folder it comes from and the plugin's name. */
+type Placed<T> = T & { dir: string; by: string };
+export type PlacedWidget = Placed<UiWidget>;
+export type PlacedSpotItem = Placed<UiSpotItem>;
+
+const byOrder = (a: { order?: number }, b: { order?: number }) => (a.order ?? 50) - (b.order ?? 50);
 
 export interface Assembly {
 	resolved: Resolved;
 	firmware: SlotFirmware[];
 	api: ApiRoute[];
 	widgets: PlacedWidget[];
+	spotItems: PlacedSpotItem[];
 	pages: (UiPage & { by: string })[];
 	parts: PartDef[];
 	wires: Wire[];
@@ -86,6 +90,7 @@ export function assemble(config: FirmwareConfig, build?: BuildInfo): Assembly {
 		firmware: [...firmware.values()],
 		api: [],
 		widgets: [],
+		spotItems: [],
 		pages: [],
 		parts: [],
 		wires: [],
@@ -152,6 +157,10 @@ export function assemble(config: FirmwareConfig, build?: BuildInfo): Assembly {
 				if (peripheral) throw noPeripheralUi(name);
 				out.widgets.push(...widgets.map((w) => ({ ...w, dir, by: name })));
 			},
+			spot: (...items) => {
+				if (peripheral) throw noPeripheralUi(name);
+				out.spotItems.push(...items.map((a) => ({ ...a, dir, by: name })));
+			},
 			page: (page) => {
 				if (peripheral) throw noPeripheralUi(name);
 				out.pages.push({ ...page, by: name });
@@ -178,10 +187,9 @@ export function assemble(config: FirmwareConfig, build?: BuildInfo): Assembly {
 
 	// Widgets only show on pages some feature provides.
 	const pageIds = new Set(out.pages.map((p) => p.id));
-	out.widgets = out.widgets
-		.filter((w) => pageIds.has(w.page))
-		.sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
-	out.pages.sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+	out.widgets = out.widgets.filter((w) => pageIds.has(w.page)).sort(byOrder);
+	out.pages.sort(byOrder);
+	out.spotItems.sort(byOrder);
 	if (out.pages.length && r.has('ip')) {
 		const accounts = hasAccounts(r);
 		out.api.unshift(

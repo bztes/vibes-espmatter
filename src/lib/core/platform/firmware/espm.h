@@ -182,6 +182,8 @@ struct espm_metric_source_t {
 };
 /** Register a source (static lifetime; up to 4). */
 void espm_metrics_add_source(const espm_metric_source_t *source);
+/** This device as one device() call, then its own values (uptime, memory, Wi-Fi) and the registry. */
+void espm_metrics_own_report(const espm_metric_sink_t *sink);
 /** The devices of all sources. */
 int espm_metrics_remote_count();
 void espm_metrics_remote_report(int index, const espm_metric_sink_t *sink);

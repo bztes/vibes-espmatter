@@ -19,16 +19,26 @@ export { default as Radio } from './Radio.svelte';
 export { default as Spinner } from './Spinner.svelte';
 export { default as Code, code } from './Code.svelte';
 export { default as CodeBlock, codeBlock } from './CodeBlock.svelte';
+export { default as Spot } from './Spot.svelte';
+export {
+	registerSpotItems,
+	type SpotName,
+	type Spots,
+	type DeviceContext,
+	type SpotItem
+} from './spots.svelte';
 export {
 	api,
 	ApiError,
 	errorText,
 	formatBytes,
 	formatDuration,
+	formatNumber,
 	getToken,
 	setToken,
 	onUnauthorized
 } from './api';
 export { Poll } from './poll.svelte';
+export { Stored } from './stored.svelte';
 export { session } from './session.svelte';
-export type { Story } from './story';
+export type { SpotStory, Story } from './story';

@@ -6,6 +6,7 @@ import { manualPairingCode, qrPayload } from './matter';
 import { boards, features, peripherals } from './registry';
 import { hasErrors, validate } from './validate';
 import { checkEndpoint } from '#sdk/matter';
+import { uiSpec } from '#lib/server/builds/device-ui.ts';
 
 const errors = (config: ReturnType<typeof createConfig>) =>
 	validate(config).filter((i) => i.severity === 'error');
@@ -95,6 +96,18 @@ describe('hub', () => {
 		expect(main.files['main/CMakeLists.txt']).toContain('"espm_scenes.cpp"');
 		expect(main.files['main/CMakeLists.txt']).toContain('"espm_time.cpp"');
 		expect(main.files['main/app_main.cpp']).toContain('espm_time_sync(ESPM_CTRL_NTP);');
+	});
+
+	it('puts spot items of plugins into the web interface', () => {
+		const hub = createConfig('hub', 'Hub');
+		enableFeature(hub, 'history');
+		const a = assemble(hub, { version: 1, buildId: 'b1' });
+		expect(a.spotItems.map((x) => [x.spot, x.file])).toEqual([
+			['device-icons', 'HistoryDeviceIcon.svelte']
+		]);
+		expect(uiSpec(a).spotItems).toEqual([
+			{ spot: 'device-icons', module: 'plugins/features/history/ui/HistoryDeviceIcon.svelte' }
+		]);
 	});
 
 	it('is only a Matter controller, no Matter device', () => {

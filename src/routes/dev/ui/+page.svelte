@@ -2,13 +2,15 @@
 <script lang="ts">
 	import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
 	import Workflow from '@lucide/svelte/icons/workflow';
+	import ChartLine from '@lucide/svelte/icons/chart-line';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import Card from '#lib/device-ui/Card.svelte';
 	import { Code, CodeBlock } from '#lib/ui/index.ts';
 	import Shell from '#lib/device-ui/Shell.svelte';
-	import { mockFetch, stories } from '#lib/device-ui/stories.ts';
+	import { registerSpotItems } from '#sdk/device-ui';
+	import { spotStories, mockFetch, stories, widgetStories } from '#lib/device-ui/stories.ts';
 	import type { ShellWidget } from '#lib/device-ui/types.ts';
 
 	const key = $derived(page.url.searchParams.get('story') ?? '');
@@ -18,12 +20,15 @@
 		return stories[key.slice(0, at)]?.find((s) => s.name === key.slice(at + 1));
 	});
 
-	/** The shell with the first story of every component, all mocks merged (first story wins). */
-	const all = Object.values(stories).flatMap((list) =>
-		list.filter((s, i) => list.findIndex((o) => o.component === s.component) === i)
+	/** The shell with the first story of every widget, all mocks merged (first story wins). */
+	const all = widgetStories.filter(
+		(s, i) => widgetStories.findIndex((o) => o.component === s.component) === i
 	);
+	/** What the spot items fetch, under every story's own answers. */
+	const spotApi = Object.assign({}, ...spotStories.map((a) => a.api ?? {}));
 	const merged = Object.assign(
 		{},
+		spotApi,
 		...Object.values(stories)
 			.flatMap((l) => l.map((s) => s.api ?? {}))
 			.reverse()
@@ -39,7 +44,8 @@
 	}));
 
 	// Installed right away (not in an effect): widgets start fetching in their own effects, which run first.
-	mockFetch(() => (shell ? merged : (story?.api ?? {})));
+	mockFetch(() => (shell ? merged : { ...spotApi, ...story?.api }));
+	registerSpotItems(spotStories);
 	const link = (dir: string, name: string) =>
 		`${resolve('/dev/ui')}?story=${encodeURIComponent(`${dir}/${name}`)}`;
 </script>
@@ -85,6 +91,7 @@
 				pages={[
 					{ id: 'dashboard', title: 'Dashboard', path: '/', icon: LayoutDashboard },
 					{ id: 'automations', title: 'Automations', path: '/automations', icon: Workflow },
+					{ id: 'history', title: 'History', path: '/history', icon: ChartLine },
 					{ id: 'settings', title: 'Admin', path: '/admin', icon: SettingsIcon, menu: true }
 				]}
 				{widgets}

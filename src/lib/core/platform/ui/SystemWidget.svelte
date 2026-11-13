@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button, Poll, Row, api, formatBytes, formatDuration } from '#sdk/device-ui';
+	import { Button, Poll, Row, api, formatBytes, formatDuration, Spot } from '#sdk/device-ui';
 
 	interface System {
 		uptime: number;
@@ -48,4 +48,7 @@
 	<Button size="sm" variant="danger" disabled={rebooting} onclick={reboot}
 		>{rebooting ? 'Restarting…' : 'Restart'}</Button
 	>
+	<div class="ml-auto flex gap-1">
+		<Spot name="device-icons" context={{ own: true, name: 'System' }} />
+	</div>
 </div>

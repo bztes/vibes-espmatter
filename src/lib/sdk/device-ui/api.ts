@@ -55,13 +55,39 @@ export async function api<T = unknown>(
 
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+// One per digit count: building a formatter per call is slow (charts format on every pointer move).
+const NUMBER_FORMATS = [0, 1, 2].map(
+	(digits) => new Intl.NumberFormat(undefined, { maximumFractionDigits: digits })
+);
+
+/** A number rounded to what makes sense for its size: `123`, `12.3`, `1.23`. */
+export function formatNumber(value: number): string {
+	const abs = Math.abs(value);
+	return NUMBER_FORMATS[abs >= 100 ? 0 : abs >= 10 ? 1 : 2].format(value);
+}
+
+/** A duration in its two biggest parts: `6d 1h`, `4m 20s`, `12.5 s`, `250 ms`. */
 export function formatDuration(seconds: number): string {
-	const d = Math.floor(seconds / 86400);
-	const h = Math.floor((seconds % 86400) / 3600);
-	const m = Math.floor((seconds % 3600) / 60);
-	if (d) return `${d}d ${h}h`;
-	if (h) return `${h}h ${m}m`;
-	return `${m}m ${seconds % 60}s`;
+	const sign = seconds < 0 ? '-' : '';
+	const abs = Math.abs(seconds);
+	if (abs < 1) return `${sign}${formatNumber(abs * 1000)} ms`;
+	if (abs < 60) return `${sign}${formatNumber(abs)} s`;
+	const s = Math.round(abs);
+	const parts: [number, string][] = [
+		[Math.floor(s / 86400), 'd'],
+		[Math.floor((s % 86400) / 3600), 'h'],
+		[Math.floor((s % 3600) / 60), 'm'],
+		[s % 60, 's']
+	];
+	const first = parts.findIndex(([n]) => n > 0);
+	return (
+		sign +
+		parts
+			.slice(first, first + 2)
+			.filter(([n]) => n > 0)
+			.map(([n, u]) => `${n}${u}`)
+			.join(' ')
+	);
 }
 
 export const formatBytes = (n: number) =>

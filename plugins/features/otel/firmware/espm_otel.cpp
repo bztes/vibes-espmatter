@@ -14,11 +14,9 @@
 #include <time.h>
 #include <sys/time.h>
 #include <esp_crt_bundle.h>
-#include <esp_heap_caps.h>
 #include <esp_http_client.h>
 #include <esp_log.h>
 #include <esp_timer.h>
-#include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/ringbuf.h>
 #include <freertos/task.h>
@@ -126,21 +124,6 @@ static void batch_metric(Batch &b, const char *name, const char *labels, const c
     cJSON_AddItemToArray(b.metrics, m);
 }
 
-static void own_metrics(Batch &b)
-{
-    batch_device(b, ESPM_DEVICE_ID, ESPM_DEVICE_NAME, nullptr);
-    batch_metric(b, "device.uptime", "", "s", esp_timer_get_time() / 1e6);
-    batch_metric(b, "device.memory.free", "", "By", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    batch_metric(b, "device.memory.min_free", "", "By", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
-#if CONFIG_ESP_WIFI_ENABLED
-    wifi_ap_record_t ap;
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) batch_metric(b, "device.wifi.rssi", "", "dBm", ap.rssi);
-#endif
-    static espm_metric_t snap[32];
-    int n = espm_metrics_snapshot(snap, 32);
-    for (int i = 0; i < n; i++) batch_metric(b, snap[i].name, snap[i].labels, snap[i].unit, snap[i].value);
-}
-
 static const espm_metric_sink_t s_sink = {
     [](void *arg, const char *id, const char *name, const char *node) { batch_device(*(Batch *)arg, id, name, node); },
     [](void *arg, const char *name, const char *labels, const char *unit, double value) {
@@ -202,7 +185,9 @@ static void export_metrics()
 {
     Batch b;
     batch_begin(b);
-    own_metrics(b);
+    espm_metric_sink_t own = s_sink;
+    own.arg = &b;
+    espm_metrics_own_report(&own);
     bool ok = true;
     int devices = espm_metrics_remote_count();
     for (int i = 0; i < devices; i++) {

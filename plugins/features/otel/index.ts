@@ -9,6 +9,7 @@ export default defineFeature({
 	icon: 'activity',
 	kinds: ['hub', 'device'],
 	needs: ['ip'],
+	provides: ['otel'],
 	fields: [
 		{
 			type: 'text',

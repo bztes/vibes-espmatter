@@ -9,6 +9,7 @@
  */
 
 import type { MatterEndpoint } from './matter';
+import type { SpotName } from './device-ui/spots.svelte';
 
 // ---------------------------------------------------------------------------------------------
 // Chips & boards
@@ -320,6 +321,18 @@ export interface UiWidget {
 	access?: 'admin' | 'account';
 }
 
+/**
+ * A component a plugin puts into other widgets, at a *spot* they offer (`<Spot name=… />` of
+ * `#sdk/device-ui`). It gets the spot's context as props and renders anything – e.g. a button
+ * opening a `Dialog` – or nothing for that context. Spots and their contexts: `Spots`.
+ */
+export interface UiSpotItem {
+	spot: SpotName;
+	/** File name inside `<plugin>/ui/`. */
+	file: string;
+	order?: number;
+}
+
 /** A page of the device web interface (provided by features). */
 export interface UiPage {
 	id: string;
@@ -448,6 +461,8 @@ export interface Contributor {
 	api(...routes: ApiRoute[]): void;
 	/** Features only: peripherals have no web UI (their Matter device types are the interface). */
 	ui(...widgets: UiWidget[]): void;
+	/** Features only: components in spots of other widgets. */
+	spot(...items: UiSpotItem[]): void;
 	/** Features only. */
 	page(page: UiPage): void;
 	part(part: PartDef): void;

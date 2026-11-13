@@ -1,21 +1,29 @@
 /**
  * Widget previews for /dev/ui: every `stories.ts` of a plugin (and the platform), keyed by folder.
  */
-import type { Story } from '#sdk/device-ui';
+import type { SpotStory, Story } from '#sdk/device-ui';
+
+const modules = Object.entries(
+	import.meta.glob<{ default: Story[]; parts?: Story[]; spotStories?: SpotStory[] }>(
+		['/plugins/**/stories.ts', '/src/lib/core/platform/stories.ts'],
+		{ eager: true }
+	)
+)
+	.map(
+		([file, m]) =>
+			[file.slice(1, -'/stories.ts'.length).replace(/^src\/lib\/core\//, ''), m] as const
+	)
+	.sort(([a], [b]) => a.localeCompare(b));
 
 export const stories: Record<string, Story[]> = Object.fromEntries(
-	Object.entries(
-		import.meta.glob<Story[]>(['/plugins/**/stories.ts', '/src/lib/core/platform/stories.ts'], {
-			import: 'default',
-			eager: true
-		})
-	)
-		.map(
-			([file, list]) =>
-				[file.slice(1, -'/stories.ts'.length).replace(/^src\/lib\/core\//, ''), list] as const
-		)
-		.sort(([a], [b]) => a.localeCompare(b))
+	modules.map(([dir, m]) => [dir, [...m.default, ...(m.parts ?? [])]])
 );
+
+/** Widget stories only (no `parts`): what the shell preview shows. */
+export const widgetStories: Story[] = modules.flatMap(([, m]) => m.default);
+
+/** What the plugins put into spots (`export const spotStories` of a `stories.ts`), on every preview. */
+export const spotStories: SpotStory[] = modules.flatMap(([, m]) => m.spotStories ?? []);
 
 /** Answer `/api/…` from the current story instead of the network. */
 export function mockFetch(routes: () => Record<string, unknown>) {

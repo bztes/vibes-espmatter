@@ -336,7 +336,8 @@ function describeCapability(cap: string): string {
 		'matter-controller': 'the Matter controller',
 		'matter-transport': 'a Matter transport (Wi-Fi or Thread)',
 		wifi: 'Wi-Fi',
-		thread: 'Thread'
+		thread: 'Thread',
+		otel: 'OpenTelemetry'
 	};
 	if (cap.startsWith('ui-page:')) return `the "${cap.slice(8)}" page of the web interface`;
 	return known[cap] ?? `"${cap}"`;

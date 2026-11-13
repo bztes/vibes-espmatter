@@ -14,7 +14,7 @@
 	import ThermometerSun from '@lucide/svelte/icons/thermometer-sun';
 	import WifiOff from '@lucide/svelte/icons/wifi-off';
 	import type { Component } from 'svelte';
-	import { Poll, Segmented, Stat, Toggle, errorText, session } from '#sdk/device-ui';
+	import { Spot, Poll, Segmented, Stat, Stored, Toggle, errorText, session } from '#sdk/device-ui';
 	import EndpointControls from './EndpointControls.svelte';
 	import {
 		controllableEndpoints,
@@ -49,22 +49,7 @@
 
 	/** Grouped by tag: a device with several tags shows in each of their groups. Remembered per browser. */
 	const GROUP_KEY = 'espm.dashboard.group';
-	let grouping = $state(load());
-	function load() {
-		try {
-			return localStorage.getItem(GROUP_KEY) === 'tags' ? 'tags' : 'all';
-		} catch {
-			return 'all';
-		}
-	}
-	function setGrouping(v: string) {
-		grouping = v;
-		try {
-			localStorage.setItem(GROUP_KEY, v);
-		} catch {
-			// private mode: just not remembered
-		}
-	}
+	const grouping = new Stored(GROUP_KEY, 'all', (v) => v === 'tags');
 	const GROUPINGS = [
 		{ value: 'all', label: 'All' },
 		{ value: 'tags', label: 'By tag' }
@@ -76,7 +61,7 @@
 	const hidden = $derived(all.length - list.length);
 	const tags = $derived(allTags(list));
 	const groups = $derived.by(() => {
-		if (grouping !== 'tags' || !tags.length) return [{ title: '', nodes: list }];
+		if (grouping.value !== 'tags' || !tags.length) return [{ title: '', nodes: list }];
 		const untagged = list.filter((n) => !n.tags?.length);
 		return [
 			...tags.map((t) => ({ title: t, nodes: list.filter((n) => n.tags?.includes(t)) })),
@@ -187,6 +172,7 @@
 					<span class="truncate">{status(node, ctrl, sensors)}</span>
 				</div>
 			</div>
+			<Spot name="device-icons" context={{ node: node.id, name: node.name }} />
 			{#if lowBattery(node)}
 				<span
 					class={[
@@ -257,12 +243,7 @@
 		<div class="mb-3 flex items-center justify-end gap-2">
 			<span class="text-xs text-muted">Group</span>
 			<div class="w-40">
-				<Segmented
-					label="Group devices"
-					value={grouping}
-					options={GROUPINGS}
-					onchange={setGrouping}
-				/>
+				<Segmented label="Group devices" bind:value={grouping.value} options={GROUPINGS} />
 			</div>
 		</div>
 	{/if}
