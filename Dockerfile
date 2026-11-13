@@ -10,8 +10,6 @@ COPY . .
 RUN pnpm build
 
 FROM base
-# The Docker CLI, for "docker" build runners (talks to the host daemon through the mounted socket).
-COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=build /app/package.json ./
 # Full node_modules: the device web UI is compiled with Vite at firmware build time.
 COPY --from=build /app/node_modules ./node_modules

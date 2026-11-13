@@ -7,6 +7,7 @@
 	import { resolve } from '$app/paths';
 	import { getMe } from '#lib/remote/auth.remote.ts';
 	import {
+		addRunner,
 		deleteRunner,
 		deleteUser,
 		getServerSettings,
@@ -14,19 +15,16 @@
 		listRunners,
 		listUsers,
 		resetPassword,
-		saveRunner,
 		saveServerSettings,
-		runnerLogOf,
 		runnerStatus,
+		setRunnerEnabled,
 		updateUser
 	} from '#lib/remote/admin.remote.ts';
 	import {
 		Badge,
 		Button,
 		Card,
-		Checkbox,
 		Code,
-		codeBlock,
 		CopyButton,
 		Dialog,
 		Field,
@@ -90,30 +88,26 @@
 	});
 
 	// Runners
-	type RunnerForm = {
-		id?: string;
-		name: string;
-		kind: 'local' | 'docker';
-		enabled: boolean;
-		config: { idfPath?: string; image?: string; concurrency: number };
-	};
-	let editing = $state<RunnerForm>();
-	async function submitRunner(e: SubmitEvent) {
-		e.preventDefault();
-		if (!editing) return;
-		const ok = await run(() => saveRunner($state.snapshot(editing!)));
-		if (ok !== undefined || !error) editing = undefined;
-	}
-
 	const STATUS = {
 		disabled: { label: 'disabled', tone: 'warn' },
-		starting: { label: 'starting…', tone: 'info' },
-		error: { label: 'error', tone: 'err' },
+		offline: { label: 'offline', tone: 'err' },
 		idle: { label: 'idle', tone: 'neutral' },
 		building: { label: 'building', tone: 'accent' }
 	} as const;
 	const statuses = runnerStatus();
-	let logOf = $state<{ id: string; name: string }>();
+	let addingRunner = $state(false);
+	let runnerName = $state('');
+	let runnerToken = $state<{ name: string; token: string }>();
+	async function submitRunner(e: SubmitEvent) {
+		e.preventDefault();
+		const name = runnerName.trim();
+		const r = await run(() => addRunner({ name }));
+		if (r) {
+			runnerToken = { name, token: r.token };
+			addingRunner = false;
+			runnerName = '';
+		}
+	}
 </script>
 
 <svelte:head><title>Admin – espmatter studio</title></svelte:head>
@@ -284,71 +278,77 @@
 			title="Build runners"
 			description="Where firmware is compiled. Without one, devices can be configured but not built."
 		>
-			{#snippet actions()}
-				<Button
-					size="sm"
-					variant="primary"
-					onclick={() =>
-						(editing = {
-							name: 'Docker',
-							kind: 'docker',
-							enabled: true,
-							config: { image: 'espressif/idf:v5.4.2', concurrency: 1 }
-						})}><Plus size={15} />Add runner</Button
-				>
-			{/snippet}
-			{#if !runners.length}
+			{#snippet actions()}<Button size="sm" variant="primary" onclick={() => (addingRunner = true)}
+					><Plus size={15} />Add runner</Button
+				>{/snippet}
+			{#if runnerToken}
+				<Notice tone="ok">
+					<div class="grid gap-2">
+						<div class="flex flex-wrap items-center gap-2">
+							Token for <strong>{runnerToken.name}</strong>:
+							<Code class="rounded bg-surface px-2 py-0.5 break-all text-fg"
+								>{runnerToken.token}</Code
+							>
+							<CopyButton text={runnerToken.token} />
+							<Button
+								variant="link"
+								size="sm"
+								class="ml-auto text-current"
+								onclick={() => (runnerToken = undefined)}>Dismiss</Button
+							>
+						</div>
+						<span class="text-xs"
+							>Shown once. Set it as <Code>RUNNER_TOKEN</Code> in <Code>runner/.env</Code>, with <Code
+								>APP_URL</Code
+							> (where the runner reaches the app), then <Code>docker compose up -d</Code> in <Code
+								>runner/</Code
+							>.</span
+						>
+					</div>
+				</Notice>
+			{:else if !runners.length}
 				<Notice tone="info">
-					Add a runner: <strong>Docker</strong> (the app runs
-					<Code>docker run espressif/idf …</Code>; Docker must be available to it) or
-					<strong>local</strong>
-					(an ESP-IDF installation on this machine, e.g. <Code>~/esp/esp-idf</Code>).
+					Add a runner and start it with its token. It only calls the app, so it may sit behind NAT.
 				</Notice>
 			{/if}
 			<div class="grid gap-3">
 				{#each runners as r (r.id)}
 					{@const rs = statuses.current?.[r.id]}
-					{@const st = STATUS[rs?.status ?? 'starting']}
+					{@const st = STATUS[rs?.status ?? 'offline']}
 					<div class="rounded-xl border border-border p-4">
 						<div class="flex flex-wrap items-center gap-3">
 							<Server size={18} class="text-muted" />
 							<div class="min-w-0">
 								<div class="font-semibold">
 									{r.name}
-									<Badge>{r.kind}</Badge>
 									<Badge tone={st.tone}
 										>{st.label}{#if rs?.status === 'building'}
-											· {rs.busy}/{r.config.concurrency}{/if}</Badge
+											· {rs.busy}/{r.concurrency}{/if}</Badge
 									>
 								</div>
 								<div class="truncate font-mono text-xs text-muted">
-									{r.kind === 'docker' ? r.config.image : r.config.idfPath} · {r.config.concurrency} at
-									a time
+									{#if r.lastSeen}
+										ESP-IDF {r.idfVersion} · {r.concurrency} at a time{#if rs?.status === 'offline'}
+											· last seen {r.lastSeen.toLocaleString()}{/if}
+									{:else}
+										never connected
+									{/if}
 								</div>
 							</div>
 							<div class="ml-auto flex gap-2">
 								<Button
 									size="sm"
 									variant="ghost"
-									onclick={() => (logOf = { id: r.id, name: r.name })}>Log</Button
-								>
-								<Button
-									size="sm"
-									variant="ghost"
-									onclick={() =>
-										(editing = {
-											id: r.id,
-											name: r.name,
-											kind: r.kind,
-											enabled: r.enabled,
-											config: { ...r.config }
-										})}>Edit</Button
+									onclick={() => run(() => setRunnerEnabled({ id: r.id, enabled: !r.enabled }))}
+									>{r.enabled ? 'Disable' : 'Enable'}</Button
 								>
 								<Button
 									size="sm"
 									variant="ghost"
 									class="text-err"
-									onclick={() => run(() => deleteRunner(r.id))}>Delete</Button
+									onclick={() =>
+										confirm(`Delete runner "${r.name}"? Its token stops working.`) !== false &&
+										run(() => deleteRunner(r.id))}>Delete</Button
 								>
 							</div>
 						</div>
@@ -382,72 +382,17 @@
 	{/snippet}
 </Dialog>
 
-<Dialog
-	bind:open={() => !!editing, (v) => !v && (editing = undefined)}
-	title={editing?.id ? 'Edit runner' : 'Add runner'}
->
-	{#if editing}
-		<form id="runner" class="grid gap-4" onsubmit={submitRunner}>
-			<Field label="Name" id="r-name"
-				><Input id="r-name" required bind:value={editing.name} /></Field
-			>
-			<Field label="Kind" id="r-kind">
-				<Select id="r-kind" bind:value={editing.kind}>
-					<option value="docker">Docker (espressif/idf image)</option>
-					<option value="local">Local ESP-IDF installation</option>
-				</Select>
-			</Field>
-			{#if editing.kind === 'docker'}
-				<Field label="Image" id="r-image" help="Needs ESP-IDF 5.4 or newer."
-					><Input id="r-image" mono bind:value={editing.config.image} /></Field
-				>
-			{:else}
-				<Field label="ESP-IDF path (IDF_PATH)" id="r-path"
-					><Input
-						id="r-path"
-						mono
-						placeholder="/home/me/esp/esp-idf"
-						required
-						bind:value={editing.config.idfPath}
-					/></Field
-				>
-			{/if}
-			<Field label="Parallel builds" id="r-conc"
-				><Input
-					id="r-conc"
-					type="number"
-					min="1"
-					max="8"
-					class="max-w-24"
-					bind:value={editing.config.concurrency}
-				/></Field
-			>
-			<Checkbox label="Enabled" bind:checked={editing.enabled} />
-		</form>
-	{/if}
+<Dialog bind:open={addingRunner} title="Add build runner">
+	<form id="add-runner" class="grid gap-4" onsubmit={submitRunner}>
+		<Field label="Name" id="runner-name"
+			><Input id="runner-name" required maxlength={80} bind:value={runnerName} /></Field
+		>
+		<p class="m-0 text-xs text-muted">
+			A token for the runner is generated and shown once. Deleting the runner revokes it.
+		</p>
+	</form>
 	{#snippet footer()}
-		<Button onclick={() => (editing = undefined)}>Cancel</Button>
-		<Button variant="primary" type="submit" form="runner">Save</Button>
-	{/snippet}
-</Dialog>
-
-<Dialog
-	bind:open={() => !!logOf, (v) => !v && (logOf = undefined)}
-	title={logOf ? `Runner log – ${logOf.name}` : 'Runner log'}
-	wide
->
-	{#if logOf}
-		{@const lines = runnerLogOf(logOf.id).current ?? []}
-		{@const st = STATUS[statuses.current?.[logOf.id]?.status ?? 'starting']}
-		<div class="mb-3"><Badge tone={st.tone}>{st.label}</Badge></div>
-		<pre
-			{@attach (el) => {
-				void lines.length;
-				el.scrollTop = el.scrollHeight;
-			}}
-			class={codeBlock({ class: 'max-h-[55vh]' })}>{lines.join('\n') || 'No output yet.'}</pre>
-	{/if}
-	{#snippet footer()}
-		<Button onclick={() => (logOf = undefined)}>Close</Button>
+		<Button onclick={() => (addingRunner = false)}>Cancel</Button>
+		<Button variant="primary" type="submit" form="add-runner">Add</Button>
 	{/snippet}
 </Dialog>

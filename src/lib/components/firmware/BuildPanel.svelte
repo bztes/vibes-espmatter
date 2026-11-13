@@ -67,7 +67,7 @@
 			(dirty
 				? 'Saving the configuration…'
 				: !runnerReady
-					? 'No build runner is set up – an admin can add one under Admin → Build runners.'
+					? 'No build runner is registered – an admin can see how to start one under Admin → Build runners.'
 					: undefined)
 	);
 </script>

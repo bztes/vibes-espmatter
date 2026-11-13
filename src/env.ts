@@ -7,8 +7,7 @@ const optional =
 
 export const variables = defineEnvVars({
 	DATA_DIR: {
-		description:
-			'Directory for the SQLite database, build workspaces and firmware artifacts. Default `./data`.',
+		description: 'Directory for the SQLite database and firmware artifacts. Default `./data`.',
 		schema: optional('./data')
 	}
 });

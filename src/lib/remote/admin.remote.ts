@@ -1,14 +1,21 @@
 /** Admin only (`requireAdmin`): users, sign-up, server settings and build runners. */
 import * as v from 'valibot';
 import { error } from '@sveltejs/kit';
-import { asc, count, eq } from 'drizzle-orm';
+import { asc, count, eq, getTableColumns } from 'drizzle-orm';
 import { command, query } from '$app/server';
 import { randomPassword } from '#lib/core/engine.ts';
 import { createUser, endAllSessions, requireAdmin, setPassword } from '#lib/server/auth.ts';
 import { db } from '#lib/server/db/index.ts';
 import { device, runner, user } from '#lib/server/db/schema.ts';
 import { runningOn } from '#lib/server/builds/queue.ts';
-import { runnerLog, runnerPhase, syncRunners, waitForRunners } from '#lib/server/builds/runners.ts';
+import { dropRunnerJobs } from '#lib/server/builds/runner.ts';
+import {
+	forgetRunner,
+	newRunnerToken,
+	runnerEvents,
+	runnerOnline,
+	waitForRunners
+} from '#lib/server/builds/runners.ts';
 import { getSetting, setSetting } from '#lib/server/settings.ts';
 import { deviceDomain } from '#lib/server/tunnel/index.ts';
 import { getSignUp } from './auth.remote.ts';
@@ -130,53 +137,63 @@ export const saveServerSettings = command(
 
 export const listRunners = query(async () => {
 	requireAdmin();
-	return db.select().from(runner).orderBy(asc(runner.createdAt));
+	const columns = getTableColumns(runner);
+	const { id, name, idfVersion, concurrency, enabled, lastSeen, createdAt } = columns;
+	return db
+		.select({ id, name, idfVersion, concurrency, enabled, lastSeen, createdAt })
+		.from(runner)
+		.orderBy(asc(runner.createdAt));
 });
 
-export const saveRunner = command(
-	v.object({
-		id: v.optional(uuid),
-		name,
-		kind: v.picklist(['local', 'docker']),
-		enabled: v.boolean(),
-		config: v.object({
-			idfPath: v.optional(v.pipe(v.string(), v.trim())),
-			image: v.optional(v.pipe(v.string(), v.trim(), v.regex(/^[\w./:@-]*$/, 'Not an image name'))),
-			concurrency: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(8))
-		})
-	}),
-	async ({ id, ...values }) => {
+const runnerId = v.pipe(v.string(), v.uuid());
+
+/** Adds a runner; answers its token, which is shown once. */
+export const addRunner = command(
+	v.object({ name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(80)) }),
+	async ({ name }) => {
 		requireAdmin();
-		if (values.kind === 'local' && !values.config.idfPath) error(400, 'Enter the ESP-IDF path.');
-		if (id) await db.update(runner).set(values).where(eq(runner.id, id));
-		else await db.insert(runner).values(values);
-		await syncRunners();
+		const { token, tokenHash } = newRunnerToken();
+		await db.insert(runner).values({ name, tokenHash });
+		runnerEvents.emit('change');
+		void listRunners().refresh();
+		return { token };
+	}
+);
+
+export const setRunnerEnabled = command(
+	v.object({ id: runnerId, enabled: v.boolean() }),
+	async ({ id, enabled }) => {
+		requireAdmin();
+		await db.update(runner).set({ enabled }).where(eq(runner.id, id));
+		runnerEvents.emit('change');
+		runnerEvents.emit('ready');
 		void listRunners().refresh();
 	}
 );
 
-export const deleteRunner = command(uuid, async (id) => {
+/** Deletes a runner; its token stops working at once. */
+export const deleteRunner = command(runnerId, async (id) => {
 	requireAdmin();
 	await db.delete(runner).where(eq(runner.id, id));
-	await syncRunners();
+	dropRunnerJobs(id);
+	forgetRunner(id);
 	void listRunners().refresh();
 });
 
-export type RunnerStatus = 'disabled' | 'starting' | 'error' | 'idle' | 'building';
+export type RunnerStatus = 'disabled' | 'offline' | 'idle' | 'building';
 
 async function runnerStatuses() {
 	const rows = await db.select().from(runner);
 	return Object.fromEntries(
 		rows.map((r) => {
-			const phase = runnerPhase(r.id);
 			const busy = runningOn(r.id);
 			const status: RunnerStatus = !r.enabled
 				? 'disabled'
-				: phase === 'ready'
-					? busy
+				: !runnerOnline(r.id)
+					? 'offline'
+					: busy
 						? 'building'
-						: 'idle'
-					: (phase ?? 'starting');
+						: 'idle';
 			return [r.id, { status, busy }];
 		})
 	);
@@ -187,15 +204,6 @@ export const runnerStatus = query.live(async function* () {
 	requireAdmin();
 	while (true) {
 		yield await runnerStatuses();
-		await waitForRunners();
-	}
-});
-
-/** A runner's log (output of its check), streamed while someone looks at it. */
-export const runnerLogOf = query.live(uuid, async function* (id) {
-	requireAdmin();
-	while (true) {
-		yield runnerLog(id);
 		await waitForRunners();
 	}
 });

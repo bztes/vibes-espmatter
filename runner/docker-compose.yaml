@@ -1,0 +1,18 @@
+# Build runner: stock espressif/idf image running the mounted runner.py.
+name: espm-runner
+services:
+  runner:
+    image: espressif/idf:${IDF_VERSION:?set IDF_VERSION in runner/.env}
+    command: ['python', '-u', '/opt/runner/runner.py']
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?set RUNNER_TOKEN in runner/.env}
+      APP_URL: ${APP_URL:?set APP_URL in runner/.env}
+      RUNNER_CONCURRENCY: ${RUNNER_CONCURRENCY:?set RUNNER_CONCURRENCY in runner/.env}
+    network_mode: host
+    volumes:
+      - ./runner.py:/opt/runner/runner.py:ro
+      - runner-data:/data
+    restart: unless-stopped
+
+volumes:
+  runner-data:

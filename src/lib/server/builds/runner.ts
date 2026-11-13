@@ -1,146 +1,161 @@
 /**
- * Runs `idf.py` for a workspace: with ESP-IDF installed on this machine (`local`) or in the
- * official Docker image (`docker`, the Docker CLI must be available to the app).
+ * Builds on a runner (runner/runner.py), which only calls the app: a job is handed out with the
+ * runner's poll; the runner posts its log in batches, uploads the artifacts in chunks to
+ * `/api/v1/runners/jobs/<id>/files/<path>` and ends with its exit code.
  */
-import { spawn } from 'node:child_process';
-import os from 'node:os';
-import type { runner } from '#lib/server/db/schema.ts';
+import { createWriteStream } from 'node:fs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
+import { runnerOnline, sendToRunner, unsend, type Runner } from './runners.ts';
 
-export type Runner = typeof runner.$inferSelect;
+export type { Runner };
 
-export const DEFAULT_IMAGE = 'espressif/idf:v5.4.2';
+/** No word from a runner about a running job for this long: it failed. */
+const SILENT_MS = 60_000;
+const CHUNK_MAX = 1024 * 1024;
 
-function lines(log: (line: string) => void) {
-	let rest = '';
-	return (chunk: Buffer) => {
-		const text = rest + chunk.toString('utf8');
-		const parts = text.split(/\r?\n|\r/);
-		rest = parts.pop() ?? '';
-		for (const line of parts) if (line.trim()) log(line);
-	};
+interface Job {
+	runnerId: string;
+	runnerName: string;
+	/** Where the artifacts are uploaded to. */
+	dir: string;
+	log: (line: string) => void;
+	sent: boolean;
+	contact: number;
+	finish: (err: Error | null, exit?: number) => void;
 }
 
-/** Volumes whose ownership was already fixed in this process (keyed by image + uid). */
-const preparedCache = new Set<string>();
+// Survives Vite HMR in development.
+const g = globalThis as unknown as { __espmRunnerJobs?: Map<string, Job> };
+const jobs = (g.__espmRunnerJobs ??= new Map<string, Job>());
 
-/**
- * Docker creates the named cache volume owned by root, but builds run as the host user, so
- * ccache and the component manager could not write to it ("ccache: error: Permission denied").
- * Once per process, create the cache directories as root and hand them to the build user.
- */
-async function prepareCacheVolume(image: string, uid: string, log: (line: string) => void) {
-	const key = `${image}|${uid}`;
-	if (preparedCache.has(key)) return;
-	const code = await spawnLogged(
-		'docker',
-		[
-			'run',
-			'--rm',
-			'--user',
-			'0:0',
-			'-v',
-			'espm-idf-cache:/cache',
-			'--entrypoint',
-			'sh',
-			image,
-			'-c',
-			`mkdir -p /cache/ccache /cache/components && chown -R ${uid} /cache`
-		],
-		os.tmpdir(),
-		log
-	);
-	if (code === 0) preparedCache.add(key);
-	else log(`WARNING: could not fix ownership of the espm-idf-cache volume (exit code ${code}).`);
-}
-
-export async function runIdf(
+/** Runs `idf.py build` for `workspace` (kept on the runner, so rebuilds are incremental). */
+export function runJob(
 	r: Runner,
-	cwd: string,
-	args: string[],
+	job: { id: string; workspace: string; files: Record<string, string | Buffer>; dir: string },
 	log: (line: string) => void,
 	signal: AbortSignal
 ): Promise<number> {
-	log(`$ idf.py ${args.join(' ')}`);
-	let command: string;
-	let argv: string[];
-	if (r.kind === 'docker') {
-		const uid =
-			typeof process.getuid === 'function'
-				? `${process.getuid()}:${process.getgid?.()}`
-				: undefined;
-		if (uid) await prepareCacheVolume(r.config.image || DEFAULT_IMAGE, uid, log);
-		command = 'docker';
-		argv = [
-			'run',
-			'--rm',
-			'-i',
-			'-v',
-			`${cwd}:/project`,
-			'-w',
-			'/project',
-			'-v',
-			'espm-idf-cache:/cache',
-			'-e',
-			'IDF_CCACHE_ENABLE=1',
-			'-e',
-			'CCACHE_DIR=/cache/ccache',
-			'-e',
-			'IDF_COMPONENT_CACHE_PATH=/cache/components',
-			'-e',
-			'HOME=/tmp',
-			...(uid ? ['--user', uid] : []),
-			r.config.image || DEFAULT_IMAGE,
-			'idf.py',
-			...args
-		];
-	} else {
-		command = 'bash';
-		const quoted = args.map((a) => `'${a.replaceAll("'", "'\\''")}'`).join(' ');
-		argv = ['-c', `. "$IDF_PATH/export.sh" > /dev/null && exec idf.py ${quoted}`];
-	}
-	return new Promise((resolve) => {
-		const child = spawn(command, argv, {
-			cwd: r.kind === 'docker' ? os.tmpdir() : cwd,
-			env: {
-				...process.env,
-				IDF_PATH: r.config.idfPath || process.env.IDF_PATH,
-				IDF_CCACHE_ENABLE: '1',
-				FORCE_COLOR: '0'
-			}
-		});
-		const kill = () => child.kill('SIGTERM');
-		signal.addEventListener('abort', kill, { once: true });
-		const onData = lines(log);
-		child.stdout.on('data', onData);
-		child.stderr.on('data', onData);
-		child.on('error', (err) => {
-			log(`ERROR: ${command} could not be started: ${err.message}`);
-			resolve(127);
-		});
-		child.on('close', (code) => {
-			signal.removeEventListener('abort', kill);
-			resolve(code ?? 1);
+	return new Promise((resolve, reject) => {
+		if (signal.aborted) return reject(new Error('Cancelled.'));
+		const watch = setInterval(() => {
+			const j = jobs.get(job.id);
+			if (!j) return;
+			if (!j.sent && !runnerOnline(r.id)) finish(new Error(`Runner "${r.name}" went offline.`));
+			else if (j.sent && Date.now() - j.contact > SILENT_MS)
+				finish(new Error(`Runner "${r.name}" stopped reporting.`));
+		}, 5000);
+		// The runner learns about a cancel from its next log post (unknown job).
+		const cancel = () => finish(new Error('Cancelled.'));
+		const finish = (err: Error | null, exit?: number) => {
+			if (jobs.get(job.id) !== entry) return;
+			jobs.delete(job.id);
+			clearInterval(watch);
+			signal.removeEventListener('abort', cancel);
+			unsend(r.id, (c) => c.type === 'build' && c.id === job.id);
+			if (err) reject(err);
+			else resolve(exit ?? 1);
+		};
+		const entry: Job = {
+			runnerId: r.id,
+			runnerName: r.name,
+			dir: job.dir,
+			log,
+			sent: false,
+			contact: Date.now(),
+			finish
+		};
+		jobs.set(job.id, entry);
+		signal.addEventListener('abort', cancel, { once: true });
+		const files = Object.fromEntries(
+			Object.entries(job.files).map(([name, content]) => [
+				name,
+				Buffer.from(content).toString('base64')
+			])
+		);
+		sendToRunner(r.id, { type: 'build', id: job.id, workspace: job.workspace, files }, () => {
+			entry.sent = true;
+			entry.contact = Date.now();
 		});
 	});
 }
 
-/** Runs a plain command with its output going to `log`. */
-export function spawnLogged(
-	command: string,
-	argv: string[],
-	cwd: string,
-	log: (line: string) => void,
-	signal?: AbortSignal
-): Promise<number> {
-	return new Promise((resolve) => {
-		const child = spawn(command, argv, { cwd, signal, killSignal: 'SIGTERM' });
-		const onData = lines(log);
-		child.stdout.on('data', onData);
-		child.stderr.on('data', onData);
-		child.on('error', (err) => {
-			if (err.name !== 'AbortError') log(`ERROR: ${command} could not be started: ${err.message}`);
-			resolve(127);
-		});
-		child.on('close', (code) => resolve(code ?? 1));
+/** Called with every poll: jobs handed out to the runner that it doesn't know any more failed. */
+export function reconcileJobs(runnerId: string, running: string[]) {
+	for (const [id, j] of jobs)
+		if (j.runnerId === runnerId && j.sent && !running.includes(id))
+			j.finish(new Error(`Runner "${j.runnerName}" lost the build (restarted?).`));
+}
+
+/** A job of this runner (a token only reaches its own runner's jobs). */
+const jobOf = (runnerId: string, id: string) => {
+	const j = jobs.get(id);
+	return j?.runnerId === runnerId ? j : undefined;
+};
+
+/** Log lines of a job; false when it is unknown (cancelled or failed) – the runner stops it. */
+export function jobLog(runnerId: string, id: string, lines: string[]): boolean {
+	const j = jobOf(runnerId, id);
+	if (!j) return false;
+	j.contact = Date.now();
+	for (const line of lines) j.log(line);
+	return true;
+}
+
+/** A chunk of an artifact at `offset` (0 starts the file). */
+export async function jobUpload(
+	runnerId: string,
+	id: string,
+	file: string,
+	offset: number,
+	body: ReadableStream<Uint8Array> | null
+): Promise<'ok' | 'unknown' | 'invalid'> {
+	const j = jobOf(runnerId, id);
+	if (!j) return 'unknown';
+	const parts = file.split('/');
+	if (!file || file.startsWith('/') || file.includes('\\') || parts.includes('..'))
+		return 'invalid';
+	const target = path.join(j.dir, ...parts);
+	const size = offset
+		? await fs.stat(target).then(
+				(s) => s.size,
+				() => -1
+			)
+		: 0;
+	if (size !== offset) return 'invalid';
+	j.contact = Date.now();
+	await fs.mkdir(path.dirname(target), { recursive: true });
+	let written = 0;
+	const limit = new TransformStream<Uint8Array, Uint8Array>({
+		transform(chunk, ctl) {
+			written += chunk.length;
+			if (written > CHUNK_MAX) ctl.error(new Error('Chunk too large'));
+			else ctl.enqueue(chunk);
+		}
 	});
+	const out = createWriteStream(target, { flags: offset ? 'a' : 'w' });
+	if (body) await pipeline(Readable.fromWeb(body.pipeThrough(limit) as never), out);
+	else await new Promise((resolve) => out.end(resolve));
+	return 'ok';
+}
+
+/** The build ended with `exit`; the artifacts are uploaded. */
+export function jobResult(runnerId: string, id: string, exit: number): boolean {
+	const j = jobOf(runnerId, id);
+	if (!j) return false;
+	j.finish(null, exit);
+	return true;
+}
+
+/** Drops a runner's workspace (with its next poll). */
+export function dropWorkspace(r: Runner, name: string) {
+	sendToRunner(r.id, { type: 'dropWorkspace', name });
+}
+
+/** Fails a runner's jobs (it was deleted). */
+export function dropRunnerJobs(runnerId: string) {
+	for (const j of jobs.values())
+		if (j.runnerId === runnerId) j.finish(new Error(`Runner "${j.runnerName}" was deleted.`));
 }

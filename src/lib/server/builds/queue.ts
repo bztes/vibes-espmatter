@@ -1,14 +1,14 @@
 /**
- * Firmware builds. Queued in the database, run on enabled runners (one build per concurrency slot),
- * each board slot of a firmware in turn (radios first). A build has nothing of a device: devices
- * get their settings in their own configuration partition. The log goes to `DATA_DIR/builds/<id>/build.log`
- * and – while running – to listeners (`buildState` live query).
+ * Firmware builds. Queued in the database, run on enabled, online runners (one build per
+ * concurrency slot), each board slot of a firmware in turn (radios first). A build has nothing of a
+ * device: devices get their settings in their own configuration partition. The log goes to
+ * `DATA_DIR/builds/<id>/build.log` and – while running – to listeners (`buildState` live query).
  *
- * Workspaces are kept per firmware and slot (`DATA_DIR/workspaces`), so rebuilds are incremental.
+ * Runners keep a workspace per firmware and slot, so rebuilds are incremental.
  */
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { createWriteStream, existsSync, type WriteStream } from 'node:fs';
+import { createWriteStream, type WriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { and, asc, eq, inArray } from 'drizzle-orm';
@@ -20,8 +20,8 @@ import { hasErrors, validate } from '#lib/core/validate.ts';
 import { db } from '#lib/server/db/index.ts';
 import { build, firmware, runner, type SlotArtifacts } from '#lib/server/db/schema.ts';
 import { buildDeviceUi, uiSpec } from './device-ui.ts';
-import { runIdf, type Runner } from './runner.ts';
-import { runnerEvents, runnerPhase, syncRunners } from './runners.ts';
+import { dropWorkspace, runJob, type Runner } from './runner.ts';
+import { runnerEvents, runnerOnline } from './runners.ts';
 import { loadFirmware } from './sources.ts';
 
 const LOG_TAIL = 400;
@@ -47,8 +47,6 @@ changes.setMaxListeners(0);
 
 export const buildsDir = () => path.resolve(DATA_DIR, 'builds');
 export const artifactDir = (id: string) => path.join(buildsDir(), path.basename(id));
-const workspaceDir = (firmwareId: string, slot: string) =>
-	path.resolve(DATA_DIR, 'workspaces', `${path.basename(firmwareId)}-${path.basename(slot)}`);
 
 export class BuildError extends Error {}
 
@@ -60,10 +58,8 @@ export async function startBuilder() {
 		.update(build)
 		.set({ status: 'failed', error: 'Interrupted: the server restarted.', finishedAt: new Date() })
 		.where(eq(build.status, 'running'));
-	// A runner that became ready may take queued builds.
+	// A runner that came online may take queued builds.
 	runnerEvents.on('ready', () => void pump());
-	await syncRunners();
-	void pump();
 }
 
 /** Builds running on a runner right now. */
@@ -156,10 +152,7 @@ async function pump() {
 	try {
 		for (;;) {
 			const runners = await enabledRunners();
-			const free = runners.find(
-				(r) =>
-					runnerPhase(r.id) === 'ready' && runningOn(r.id) < Math.max(1, r.config.concurrency || 1)
-			);
+			const free = runners.find((r) => runnerOnline(r.id) && runningOn(r.id) < r.concurrency);
 			if (!free) return;
 			const [next] = await db
 				.select()
@@ -263,55 +256,48 @@ async function run(
 		if (signal.aborted) throw new Error('Cancelled.');
 		await db.update(build).set({ step: project.slot }).where(eq(build.id, row.id));
 		log(`── ${project.name}: ${project.board} (${project.target}) ──`);
-		const ws = workspaceDir(fw.id, project.slot);
-		await writeWorkspace(ws, project.files, log);
-		if (project.needsUi) {
-			const ui = await buildDeviceUi(uiSpec(a), path.resolve(DATA_DIR, 'cache', 'device-ui'), log);
-			await writeIfChanged(path.join(ws, 'main', UI_FILE), ui);
+		const files: Record<string, string | Buffer> = { ...project.files };
+		if (project.needsUi)
+			files[`main/${UI_FILE}`] = await buildDeviceUi(
+				uiSpec(a),
+				path.resolve(DATA_DIR, 'cache', 'device-ui'),
+				log
+			);
+		// The runner uploads its build directory's images here.
+		const upload = path.join(artifactDir(row.id), `.runner-${project.slot}`);
+		await fs.rm(upload, { recursive: true, force: true });
+		try {
+			const exit = await runJob(
+				r,
+				{
+					id: `${row.id}-${project.slot}`,
+					workspace: workspaceName(fw.id, project.slot),
+					files,
+					dir: upload
+				},
+				log,
+				signal
+			);
+			if (signal.aborted) throw new Error('Cancelled.');
+			if (exit !== 0) throw new Error(`${project.name}: idf.py build failed (exit code ${exit}).`);
+			out[project.slot] = await collect(
+				(f) => fs.readFile(path.join(upload, ...f.split('/'))),
+				artifactDir(row.id),
+				project,
+				log
+			);
+		} finally {
+			await fs.rm(upload, { recursive: true, force: true });
 		}
-		const code = await runIdf(r, ws, ['build'], log, signal);
-		if (signal.aborted) throw new Error('Cancelled.');
-		if (code !== 0) throw new Error(`${project.name}: idf.py build failed (exit code ${code}).`);
-		out[project.slot] = await collect(ws, artifactDir(row.id), project, log);
 	}
 	return out;
 }
 
-async function writeIfChanged(file: string, content: Buffer | string) {
-	const data = typeof content === 'string' ? Buffer.from(content) : content;
-	const current = await fs.readFile(file).catch(() => null);
-	if (current?.equals(data)) return;
-	await fs.mkdir(path.dirname(file), { recursive: true });
-	await fs.writeFile(file, data);
-}
+const workspaceName = (firmwareId: string, slot: string) => `${firmwareId}-${slot}`;
 
-/** Only changed files are written, so ninja rebuilds incrementally; stale sources are removed. */
-async function writeWorkspace(ws: string, files: Record<string, string>, log: (l: string) => void) {
-	const fresh = !existsSync(ws);
-	log(
-		fresh
-			? 'New workspace – the first build downloads esp-matter and takes a while.'
-			: 'Reusing workspace.'
-	);
-	for (const [name, content] of Object.entries(files)) {
-		const target = path.join(ws, name);
-		if (!target.startsWith(ws + path.sep)) throw new Error(`Invalid file name ${name}`);
-		await writeIfChanged(target, content);
-	}
-	// sdkconfig is derived from sdkconfig.defaults: regenerate when those change.
-	const defaultsChanged = await fs
-		.stat(path.join(ws, 'sdkconfig'))
-		.then(async (s) => (await fs.stat(path.join(ws, 'sdkconfig.defaults'))).mtimeMs > s.mtimeMs)
-		.catch(() => false);
-	if (defaultsChanged) await fs.rm(path.join(ws, 'sdkconfig'));
-	for (const entry of await fs.readdir(path.join(ws, 'main'))) {
-		if (entry === UI_FILE) continue;
-		if (!(`main/${entry}` in files)) await fs.rm(path.join(ws, 'main', entry), { recursive: true });
-	}
-}
-
+/** Copies a slot's images from the runner's artifacts (`read`: a file of its build directory). */
 async function collect(
-	ws: string,
+	read: (file: string) => Promise<Buffer>,
 	dest: string,
 	project: {
 		slot: string;
@@ -324,17 +310,14 @@ async function collect(
 	},
 	log: (l: string) => void
 ): Promise<SlotArtifacts> {
-	const buildDir = path.join(ws, 'build');
-	const args = JSON.parse(
-		await fs.readFile(path.join(buildDir, 'flasher_args.json'), 'utf8')
-	) as FlasherArgs;
+	const args = JSON.parse((await read('flasher_args.json')).toString('utf8')) as FlasherArgs;
 	const slotDir = path.join(dest, project.slot);
 	await fs.mkdir(slotDir, { recursive: true });
 	const parts = [];
 	let end = 0;
 	const chunks: { offset: number; data: Buffer }[] = [];
 	for (const [offsetHex, file] of Object.entries(args.flash_files)) {
-		const data = await fs.readFile(path.join(buildDir, file));
+		const data = await read(file);
 		const name = path.basename(file);
 		const offset = parseInt(offsetHex, 16);
 		await fs.writeFile(path.join(slotDir, name), data);
@@ -347,8 +330,8 @@ async function collect(
 	for (const c of chunks) c.data.copy(merged, c.offset);
 	await fs.writeFile(path.join(slotDir, 'merged.bin'), merged);
 	const appFile = path.basename(args.app.file);
-	const app = await fs.readFile(path.join(buildDir, args.app.file));
-	await fs.copyFile(path.join(buildDir, args.app.file), path.join(slotDir, 'app.bin'));
+	const app = await read(args.app.file);
+	await fs.writeFile(path.join(slotDir, 'app.bin'), app);
 	log(`${project.name}: app ${(app.length / 1024).toFixed(0)} KB (${appFile})`);
 	return {
 		name: project.name,
@@ -373,14 +356,15 @@ export async function getBuild(id: string) {
 	return row;
 }
 
-/** Artifacts and workspaces of firmwares about to be deleted. */
+/** Artifacts and (on the online runners) workspaces of firmwares about to be deleted. */
 export async function deleteBuildsOf(firmwareIds: string[]) {
 	const rows = await db
 		.select({ id: build.id })
 		.from(build)
 		.where(inArray(build.firmwareId, firmwareIds));
 	for (const r of rows) await fs.rm(artifactDir(r.id), { recursive: true, force: true });
+	const online = (await enabledRunners()).filter((r) => runnerOnline(r.id));
 	for (const id of firmwareIds)
 		for (const slot of ['main', 'radio'])
-			await fs.rm(workspaceDir(id, slot), { recursive: true, force: true });
+			for (const r of online) dropWorkspace(r, workspaceName(id, slot));
 }

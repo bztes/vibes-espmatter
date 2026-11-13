@@ -26,3 +26,7 @@ vite.config.ts.timestamp-*
 
 # App data (database, workspaces, firmware)
 /data
+
+# Python
+__pycache__/
+*.pyc

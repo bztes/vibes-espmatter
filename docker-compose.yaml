@@ -3,15 +3,12 @@ services:
     build: .
     ports: ['3000:3000']
     environment:
-      # Same absolute path on the host and in the container: "docker" runners mount the build
-      # workspaces into the espressif/idf container through the host's Docker daemon.
-      DATA_DIR: ${PWD}/data
+      DATA_DIR: /data
       # Behind a reverse proxy / TLS terminator, set ADDRESS_HEADER=X-Forwarded-For (and XFF_DEPTH
       # to the number of proxies) so the app sees real client addresses – the login limit for remote
       # access is per client. Leave unset when clients connect directly (the header could be faked).
       ADDRESS_HEADER: ${ADDRESS_HEADER:-}
       XFF_DEPTH: ${XFF_DEPTH:-1}
     volumes:
-      - ${PWD}/data:${PWD}/data
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data
     restart: unless-stopped

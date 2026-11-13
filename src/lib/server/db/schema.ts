@@ -196,23 +196,17 @@ export const deployment = sqliteTable(
 	(t) => [index('deployment_device_idx').on(t.deviceId, t.slot)]
 );
 
-export type RunnerKind = 'local' | 'docker';
-
-export interface RunnerConfig {
-	/** local: ESP-IDF checkout. */
-	idfPath?: string;
-	/** docker: image, e.g. `espressif/idf:v5.4.2`. */
-	image?: string;
-	/** Parallel builds on this runner. */
-	concurrency: number;
-}
-
-/** Where firmware is compiled, set up by an admin. */
+/** Where firmware is compiled: a runner (runner/runner.py), added by an admin. */
 export const runner = sqliteTable('runner', {
 	id: id(),
 	name: text('name').notNull(),
-	kind: text('kind').$type<RunnerKind>().notNull(),
-	config: text('config', { mode: 'json' }).$type<RunnerConfig>().notNull(),
+	/** SHA-256 of the runner's token, which is shown once. */
+	tokenHash: text('token_hash').notNull().unique(),
+	/** Reported by the runner; null until it first polls. */
+	idfVersion: text('idf_version'),
+	/** Parallel builds. */
+	concurrency: integer('concurrency').notNull().default(1),
 	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+	lastSeen: integer('last_seen', { mode: 'timestamp_ms' }),
 	createdAt
 });
