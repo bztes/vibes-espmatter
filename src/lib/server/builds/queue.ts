@@ -356,6 +356,17 @@ export async function getBuild(id: string) {
 	return row;
 }
 
+/** Delete a finished build with its artifacts. */
+export async function deleteBuild(id: string) {
+	if (state.running.has(id)) throw new BuildError('Cancel the build first');
+	const [row] = await db
+		.delete(build)
+		.where(and(eq(build.id, id), inArray(build.status, ['success', 'failed', 'cancelled'])))
+		.returning({ id: build.id });
+	if (!row) throw new BuildError('Cancel the build first');
+	await fs.rm(artifactDir(id), { recursive: true, force: true });
+}
+
 /** Artifacts and (on the online runners) workspaces of firmwares about to be deleted. */
 export async function deleteBuildsOf(firmwareIds: string[]) {
 	const rows = await db

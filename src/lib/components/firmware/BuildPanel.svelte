@@ -4,12 +4,14 @@
 	import FileArchive from '@lucide/svelte/icons/file-archive';
 	import Hammer from '@lucide/svelte/icons/hammer';
 	import Square from '@lucide/svelte/icons/square';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { untrack } from 'svelte';
 	import { resolve } from '$app/paths';
 	import {
 		buildState,
 		cancelBuild,
 		canBuild,
+		deleteBuild,
 		listBuilds,
 		startBuild
 	} from '#lib/remote/builds.remote.ts';
@@ -56,6 +58,25 @@
 		}
 	}
 
+	let confirmDelete = $state(false);
+	let deleting = $state(false);
+
+	async function remove(id: string) {
+		error = '';
+		deleting = true;
+		try {
+			await deleteBuild(id);
+			// Don't fall back to a list that may still hold the deleted build.
+			picked = builds.find((b) => b.id !== id)?.id;
+			await listBuilds(firmwareId).refresh();
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			deleting = false;
+			confirmDelete = false;
+		}
+	}
+
 	// The history shows the status too: refresh it when the selected build changes state.
 	const status = $derived(selected ? buildState(selected).current?.status : undefined);
 	$effect(() => {
@@ -97,8 +118,8 @@
 			{#if why}<Notice tone={blocked ? 'err' : 'info'}>{why}</Notice>{/if}
 			{#if error}<div class="mt-3"><Notice tone="err">{error}</Notice></div>{/if}
 
-			{#if selected}
-				{@const s = await buildState(selected)}
+			{@const s = selected ? await buildState(selected) : null}
+			{#if s}
 				<div class={['grid grid-cols-1 gap-4', why || error ? 'mt-4' : '']}>
 					<div class="flex flex-wrap items-center gap-3">
 						<span class="text-base font-semibold">Version {s.version}</span>
@@ -116,8 +137,39 @@
 							<Button size="sm" variant="ghost" class="ml-auto" onclick={() => cancelBuild(s.id)}
 								><Square size={14} />Cancel</Button
 							>
+						{:else}
+							<Button
+								size="sm"
+								variant="ghost"
+								class="ml-auto"
+								disabled={confirmDelete || deleting}
+								onclick={() => (confirmDelete = true)}><Trash2 size={14} />Delete</Button
+							>
 						{/if}
 					</div>
+					{#if confirmDelete}
+						<Notice tone="err">
+							<div class="flex flex-wrap items-center gap-3">
+								<span class="min-w-0 flex-1 basis-48"
+									>Delete version {s.version} with its images? Its deployment history goes too.</span
+								>
+								<div class="ml-auto flex gap-2">
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={deleting}
+										onclick={() => (confirmDelete = false)}>Cancel</Button
+									>
+									<Button
+										variant="danger"
+										size="sm"
+										disabled={deleting}
+										onclick={() => remove(s.id)}>Yes, delete</Button
+									>
+								</div>
+							</div>
+						</Notice>
+					{/if}
 					{#if s.error}<Notice tone="err">{s.error}</Notice>{/if}
 					<BuildLog lines={s.log} live={s.status === 'running'} />
 
@@ -174,7 +226,10 @@
 				<li>
 					<button
 						type="button"
-						onclick={() => (picked = b.id)}
+						onclick={() => {
+							picked = b.id;
+							confirmDelete = false;
+						}}
 						class={[
 							'flex w-full items-center justify-between gap-2 px-5 py-2.5 text-left text-sm hover:bg-surface-2',
 							b.id === selected && 'bg-accent-soft/50'

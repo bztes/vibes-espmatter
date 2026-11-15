@@ -7,6 +7,7 @@ import { build } from '#lib/server/db/schema.ts';
 import {
 	BuildError,
 	cancelBuild as cancel,
+	deleteBuild as remove,
 	enabledRunners,
 	enqueueBuild,
 	getBuild,
@@ -49,6 +50,20 @@ export const cancelBuild = command(uuid, async (id) => {
 	await cancel(id);
 });
 
+export const deleteBuild = command(uuid, async (id) => {
+	const b = await getBuild(id);
+	if (!b) return; // already gone
+	await ownedFirmware(b.firmwareId);
+	try {
+		await remove(id);
+	} catch (err) {
+		if (err instanceof BuildError) error(400, err.message);
+		throw err;
+	}
+	void listBuilds(b.firmwareId).refresh();
+	void getFirmware(b.firmwareId).refresh();
+});
+
 /** Builds of a firmware, newest first. */
 export const listBuilds = query(uuid, async (firmwareId) => {
 	await ownedFirmware(firmwareId);
@@ -69,7 +84,7 @@ export const listBuilds = query(uuid, async (firmwareId) => {
 
 async function snapshot(id: string) {
 	const b = await getBuild(id);
-	if (!b) error(404, 'Build not found');
+	if (!b) return;
 	await ownedFirmware(b.firmwareId);
 	const config = normalize(b.config);
 	return {
@@ -91,14 +106,14 @@ async function snapshot(id: string) {
 		log: await logTail(id)
 	};
 }
-export type BuildSnapshot = Awaited<ReturnType<typeof snapshot>>;
+export type BuildSnapshot = NonNullable<Awaited<ReturnType<typeof snapshot>>>;
 
-/** Build state and log tail, streamed until the build is finished. */
+/** Build state and log tail, streamed until the build is finished or deleted. */
 export const buildState = query.live(uuid, async function* (id) {
 	while (true) {
 		const s = await snapshot(id);
-		yield s;
-		if (FINAL.has(s.status)) return;
+		yield s ?? null;
+		if (!s || FINAL.has(s.status)) return;
 		await waitForChange(id);
 	}
 });

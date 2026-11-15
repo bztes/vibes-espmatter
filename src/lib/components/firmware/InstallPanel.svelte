@@ -99,10 +99,10 @@
 			title="Install"
 			description="Builds of {device.firmware.name}. Build new versions on the firmware’s page."
 		>
-			{#if !selected}
+			{@const s = selected ? await buildState(selected) : null}
+			{#if !s}
 				<p class="m-0 text-sm text-muted">No finished build of {device.firmware.name} yet.</p>
 			{:else}
-				{@const s = await buildState(selected)}
 				<div class="grid gap-4">
 					<div class="flex flex-wrap items-center gap-3">
 						<Select
