@@ -1,8 +1,4 @@
-<!--
-	Renders a plugin's declarative fields. Plugins never ship their own editors.
-	On a firmware: per-device fields are marked (their values are the defaults of its devices).
-	On a device (`onset`): changes go to the device, and each field shows where its value comes from.
--->
+<!-- Renders a plugin's declarative fields. Plugins never ship their own editors. -->
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { Field as FieldDef, GpioField, Issue, Settings, SettingValue } from '#sdk';
@@ -15,7 +11,7 @@
 		type Resolved
 	} from '#lib/core/engine.ts';
 	import type { FirmwareConfig } from '#lib/core/model.ts';
-	import { Button, Field, Input, Select, Toggle } from '#lib/ui/index.ts';
+	import { Field, Input, Select, Toggle } from '#lib/ui/index.ts';
 
 	let {
 		fields = [],
@@ -24,9 +20,7 @@
 		resolved,
 		issues,
 		scope,
-		onset,
-		origin,
-		onreset
+		onset
 	}: {
 		fields?: FieldDef[];
 		settings: Settings;
@@ -34,10 +28,8 @@
 		resolved: Resolved;
 		issues: Issue[];
 		scope: string;
-		/** Device mode: called instead of changing `settings`. */
+		/** Called instead of changing `settings`. */
 		onset?: (key: string, value: SettingValue) => void;
-		origin?: (key: string) => 'device' | 'firmware';
-		onreset?: (key: string) => void;
 	} = $props();
 
 	const set = (key: string, value: SettingValue) =>
@@ -82,7 +74,7 @@
 		<div class="flex items-start gap-3 sm:col-span-2">
 			<Toggle label={f.label} bind:checked={() => !!settings[f.key], (v) => set(f.key, v)} />
 			<div>
-				<div class="text-sm font-medium">{f.label}{@render hint(f)}</div>
+				<div class="text-sm font-medium">{f.label}</div>
 				{#if f.help}<div class="text-xs text-muted">{f.help}</div>{/if}
 			</div>
 		</div>
@@ -94,7 +86,6 @@
 			error={issueOf(f.key, 'error')}
 			warning={issueOf(f.key, 'warning')}
 		>
-			{#snippet extra()}{@render hint(f)}{/snippet}
 			{#if f.type === 'text'}
 				<Input
 					id={id(f.key)}
@@ -142,25 +133,6 @@
 				</Select>
 			{/if}
 		</Field>
-	{/if}
-{/snippet}
-
-{#snippet hint(f: FieldDef)}
-	{#if onset && origin}
-		{@const from = origin(f.key)}
-		{#if from === 'device'}
-			<Button variant="link" size="sm" class="ml-2 font-normal" onclick={() => onreset?.(f.key)}
-				>reset</Button
-			>
-		{:else}
-			<span class="ml-2 text-xs font-normal text-muted">firmware default</span>
-		{/if}
-	{:else if f.perDevice}
-		<span
-			class="ml-2 rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent"
-			title="Each device can have its own value; this is the default for devices of this firmware."
-			>per device</span
-		>
 	{/if}
 {/snippet}
 

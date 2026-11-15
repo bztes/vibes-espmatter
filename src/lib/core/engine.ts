@@ -14,6 +14,7 @@ import {
 	type FlashOverWire,
 	type Field,
 	type GpioField,
+	type PerDeviceField,
 	type PluginContext,
 	type Settings,
 	type SettingValue,
@@ -163,9 +164,14 @@ export function pluginContext<S extends Settings>(
 		device: { name: r.config.name, kind: r.config.kind },
 		cfg(key): CExpr {
 			const field = fields.find((f) => f.key === key);
-			if (!field?.perDevice || field.type === 'gpio')
+			if (!field || !isPerDevice(field))
 				throw new Error(`${scope}: '${key}' is no per-device field`);
-			return cfgExpr(nvsNamespace(scope), key, cfgType(field), settings[key]);
+			return cfgExpr(
+				nvsNamespace(scope),
+				key,
+				cfgType(field),
+				fieldDefault(field, defaultsOf(r.config))
+			);
 		},
 		board: (slot) => r.slot(slot).board,
 		chip: (slot) => r.slot(slot).chip,
@@ -177,11 +183,21 @@ export function pluginContext<S extends Settings>(
 // Defaults & normalization
 // ---------------------------------------------------------------------------------------------
 
+/** Set per device: the firmware has no value for it. */
+export const isPerDevice = (f: Field): f is PerDeviceField => !!f.perDevice && f.type !== 'gpio';
+
 function defaultContext(board: BoardDef, deviceName: string): DefaultContext {
 	return { board, chip: CHIPS[board.chip], deviceName };
 }
 
-function fieldDefault(field: Field, ctx: DefaultContext): SettingValue {
+/** The fields a firmware has values for. */
+export const firmwareFields = (fields: Field[] = []) => fields.filter((f) => !isPerDevice(f));
+
+/** What defaults of a firmware's (non-pin) fields depend on. */
+export const defaultsOf = (config: Pick<FirmwareConfig, 'boards' | 'kind' | 'name'>) =>
+	defaultContext(boardOrDefault(config.boards[MAIN], KINDS[config.kind].defaultBoard), config.name);
+
+export function fieldDefault(field: Field, ctx: DefaultContext): SettingValue {
 	return typeof field.default === 'function'
 		? (field.default as (c: DefaultContext) => SettingValue)(ctx)
 		: field.default;
@@ -209,15 +225,11 @@ function coerce(field: Field, value: unknown, fallback: SettingValue): SettingVa
 /** A value of the right type for a field (`fallback` when it can't be one). */
 export { coerce as coerceSetting };
 
-/** Settings with every field present and of the right type. Unknown keys are dropped. */
-export function normalizeSettings(
-	fields: Field[] = [],
-	raw: unknown,
-	ctx: DefaultContext
-): Settings {
+/** Firmware settings: every firmware field present and of the right type, nothing else. */
+function normalizeSettings(fields: Field[] = [], raw: unknown, ctx: DefaultContext): Settings {
 	const values = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
 	return Object.fromEntries(
-		fields.map((f) => [f.key, coerce(f, values[f.key], fieldDefault(f, ctx))])
+		firmwareFields(fields).map((f) => [f.key, coerce(f, values[f.key], fieldDefault(f, ctx))])
 	);
 }
 
@@ -353,7 +365,7 @@ function normalizeFieldsPerBoard(
 	const values = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
 	const plugin = def.type === 'feature' ? def : {};
 	return Object.fromEntries(
-		(def.fields ?? []).map((f) => {
+		firmwareFields(def.fields).map((f) => {
 			const ctx = defaultContext(fieldBoard(f, config, plugin), deviceName);
 			return [f.key, coerce(f, values[f.key], fieldDefault(f, ctx))];
 		})
@@ -404,11 +416,7 @@ export function addPeripheral(
 		uid: newUid(config.peripherals.map((s) => s.uid)),
 		peripheral: peripheralId,
 		name: name ?? (def.multiple && count ? `${def.name} ${count + 1}` : def.name),
-		settings: normalizeSettings(
-			def.fields,
-			{},
-			defaultContext(boardOrDefault(config.boards[MAIN]), config.name)
-		)
+		settings: normalizeSettings(def.fields, {}, defaultsOf(config))
 	};
 	config.peripherals.push(instance);
 	assignPins(config);

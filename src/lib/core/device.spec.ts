@@ -10,12 +10,14 @@ const identity = { id: 'dev-1', name: 'Kitchen', apiToken: 'tok', appUrl: 'http:
 describe('per-device settings', () => {
 	it('are read at runtime, not compiled in', () => {
 		const fw = createConfig('device', 'Sensors');
-		fw.features.wifi.ssid = 'Home';
 		const relay = addPeripheral(fw, 'relay');
+		// The firmware has no values for them.
+		expect(fw.features.wifi).not.toHaveProperty('ssid');
+		expect(relay.settings).not.toHaveProperty('startup');
 		const [main] = generate(assemble(fw), (ref) => `// ${ref.file}`);
 		const header = main.files['main/espm_config.h'];
 		expect(header).toContain('#include "espm_cfg.h"');
-		expect(header).toContain('#define ESPM_WIFI_SSID (espm_cfg_str("f.wifi", "ssid", "Home"))');
+		expect(header).toContain('#define ESPM_WIFI_SSID (espm_cfg_str("f.wifi", "ssid", ""))');
 		expect(header).toContain('#define ESPM_API_TOKEN (espm_cfg_str("espm", "token", ""))');
 		expect(header).toContain('#define ESPM_UPDATE_PULL 1');
 		// Pins stay compiled in, the startup state is the device's.
@@ -25,28 +27,33 @@ describe('per-device settings', () => {
 		expect(main.files['main/app_main.cpp']).toContain(`, ${relay.settings.gpio}, true,`);
 	});
 
-	it('come from the device, then the firmware', async () => {
+	it('all come from the device', async () => {
 		const fw = createConfig('device', 'Sensors');
-		fw.features.wifi.ssid = 'Firmware';
 		const climate = addPeripheral(fw, 'climate-sensor');
 		const dev = normalizeDevice(
-			{ plugins: { [`peripheral:${climate.uid}`]: { offset: '-1.5', bogus: 1 } } },
+			{
+				plugins: {
+					[`peripheral:${climate.uid}`]: { offset: '-1.5', bogus: 1 },
+					'feature:gone': { x: 1 }
+				}
+			},
 			fw
 		);
-		expect(dev.plugins[`peripheral:${climate.uid}`]).toEqual({ offset: -1.5 });
-		fw.features.wifi.password = 'secret123';
+		expect(dev.plugins[`peripheral:${climate.uid}`]).toEqual({ interval: 30, offset: -1.5 });
+		expect(dev.plugins['feature:wifi']).toEqual({ ssid: '', password: '', powerSave: 'min' });
+		expect(dev.plugins).not.toHaveProperty('feature:gone');
+		dev.plugins['feature:wifi'].ssid = 'Own';
 		const eff = effectiveConfig(fw, dev, 'Kitchen');
 		expect(eff.name).toBe('Kitchen');
-		expect(eff.features.wifi).toMatchObject({ ssid: 'Firmware', password: 'secret123' });
+		expect(eff.features.wifi.ssid).toBe('Own');
 		expect(eff.peripherals[0].settings.offset).toBe(-1.5);
-		expect(fw.features.wifi.ssid).toBe('Firmware');
+		expect(fw.features.wifi).not.toHaveProperty('ssid');
 
-		dev.plugins['feature:wifi'] = { ssid: 'Own' };
 		const { entries, rev } = await deviceEntries(fw, dev, identity);
 		const get = (ns: string, key: string) =>
 			entries.find((e) => e.ns === ns && e.key === key)?.value;
 		expect(get('f.wifi', 'ssid')).toBe('Own');
-		expect(get('f.wifi', 'password')).toBe('secret123');
+		expect(get('f.wifi', 'password')).toBe('');
 		expect(get(`p.${climate.uid}`, 'offset')).toBe(-1.5);
 		expect(get('espm', 'token')).toBe('tok');
 		expect(get('espm', 'app_url')).toBe('http://app:5173');
@@ -62,26 +69,28 @@ describe('per-device settings', () => {
 		const fw = createConfig('device', 'Sensors');
 		addPeripheral(fw, 'contact-sensor');
 		enableFeature(fw, 'otel');
-		// The firmware may leave the endpoint to its devices …
+		// The firmware has no endpoint …
 		expect(validate(fw).some((i) => i.field === 'endpoint')).toBe(false);
 		// … a device needs one.
 		const dev = normalizeDevice({}, fw);
 		expect(validateDevice(fw, dev, 'Door').map((i) => i.field)).toContain('endpoint');
-		dev.plugins['feature:otel'] = { endpoint: 'http://collector:4318' };
+		dev.plugins['feature:otel'].endpoint = 'http://collector:4318';
 		expect(validateDevice(fw, dev, 'Door').map((i) => i.field)).toEqual(['uiPasswordHash']);
 		dev.uiPasswordHash = `pbkdf2-sha256$2000$${'ab'.repeat(16)}$${'cd'.repeat(32)}`;
 		expect(validateDevice(fw, dev, 'Door')).toEqual([]);
 	});
 
 	it('get new Matter codes per device, and keep only password hashes', () => {
-		const a = normalizeDevice({});
-		const b = normalizeDevice({});
+		const fw = createConfig('device');
+		const norm = (raw: unknown) => normalizeDevice(raw, fw);
+		const a = norm({});
+		const b = norm({});
 		expect(a.matter).not.toEqual(b.matter);
 		expect(a.uiPasswordHash).toBe('');
 		const hash = `pbkdf2-sha256$2000$${'ab'.repeat(16)}$${'cd'.repeat(32)}`;
-		expect(normalizeDevice({ uiPasswordHash: hash }).uiPasswordHash).toBe(hash);
-		expect(normalizeDevice({ uiPasswordHash: 'secret123' }).uiPasswordHash).toBe('');
-		expect(normalizeDevice({ uiPassword: 'secret123' })).not.toHaveProperty('uiPassword');
-		expect(normalizeDevice({ matter: { passcode: 11111111 } }).matter.passcode).not.toBe(11111111);
+		expect(norm({ uiPasswordHash: hash }).uiPasswordHash).toBe(hash);
+		expect(norm({ uiPasswordHash: 'secret123' }).uiPasswordHash).toBe('');
+		expect(norm({ uiPassword: 'secret123' })).not.toHaveProperty('uiPassword');
+		expect(norm({ matter: { passcode: 11111111 } }).matter.passcode).not.toBe(11111111);
 	});
 });

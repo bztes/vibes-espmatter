@@ -20,7 +20,7 @@ import {
 	type Resolved,
 	type ResolvedSlot
 } from './engine';
-import { effectiveConfig, HOSTNAME, isPerDevice } from './device';
+import { effectiveConfig, HOSTNAME } from './device';
 import { KINDS } from './kinds';
 import { appLink } from './link';
 import { validPasscode } from './matter';
@@ -72,30 +72,19 @@ export function capName(cap: string): string {
 	);
 }
 
-/**
- * `firmware`: per-device fields hold defaults, so they may stay empty. `device`: the values the
- * device gets.
- */
-export type Level = 'firmware' | 'device';
-
-function fieldIssues(
-	fields: Field[] = [],
-	settings: Settings,
-	scope: string,
-	level: Level = 'firmware'
-): Issue[] {
+/** Fields without a value here (per-device ones of a firmware) are checked on the device. */
+function fieldIssues(fields: Field[] = [], settings: Settings, scope: string): Issue[] {
 	const issues: Issue[] = [];
 	for (const f of fields) {
-		if (f.when && !f.when(settings)) continue;
+		if (!(f.key in settings) || (f.when && !f.when(settings))) continue;
 		const value = settings[f.key];
 		const err = (message: string) =>
 			issues.push({ severity: 'error', scope, field: f.key, message });
 		switch (f.type) {
 			case 'text': {
 				const s = String(value ?? '');
-				if (f.required && !s.trim()) {
-					if (!f.perDevice || level === 'device') err(`${f.label} is required.`);
-				} else if (f.maxLength && s.length > f.maxLength)
+				if (f.required && !s.trim()) err(`${f.label} is required.`);
+				else if (f.maxLength && s.length > f.maxLength)
 					err(`${f.label} must be at most ${f.maxLength} characters.`);
 				else if (s && f.pattern && !f.pattern.regex.test(s)) err(f.pattern.message);
 				break;
@@ -119,11 +108,7 @@ function fieldIssues(
 	return issues;
 }
 
-export function validate(
-	config: FirmwareConfig,
-	r: Resolved = resolve(config),
-	level: Level = 'firmware'
-): Issue[] {
+export function validate(config: FirmwareConfig, r: Resolved = resolve(config)): Issue[] {
 	const issues: Issue[] = [];
 	const kind = KINDS[config.kind];
 	const main = r.slot(MAIN);
@@ -196,15 +181,10 @@ export function validate(
 				push('warning', scope, `${name} works best with ${describeCapability(cap)}.`);
 		if (def.type === 'feature' && def.group)
 			groups.set(def.group, [...(groups.get(def.group) ?? []), name]);
-		issues.push(...fieldIssues(def.fields, settings, scope, level));
+		issues.push(...fieldIssues(def.fields, settings, scope));
 		const custom = def.validate?.(pluginContext(r, settings, scope, def.fields)) ?? [];
-		// Hints about per-device values belong to the devices (their values are checked there).
-		const perDevice = (key?: string) =>
-			!!key && !!def.fields?.find((f) => f.key === key && isPerDevice(f));
 		issues.push(
-			...custom
-				.filter((i) => level === 'device' || i.severity === 'error' || !perDevice(i.field))
-				.map((i) => ({ ...i, scope }))
+			...custom.filter((i) => !i.field || i.field in settings).map((i) => ({ ...i, scope }))
 		);
 	}
 	for (const [group, names] of groups)
@@ -218,26 +198,18 @@ export function validate(
 }
 
 /**
- * What is wrong with one device of a firmware: its per-device values (as `validate` sees them in
- * the configuration the device gets) and its own settings. Firmware problems aren't repeated.
+ * What is wrong with one device of a firmware: what its values add to the firmware's issues
+ * (those aren't repeated), and its own settings.
  */
 export function validateDevice(
 	firmware: FirmwareConfig,
 	device: DeviceSettings,
 	name: string
 ): Issue[] {
-	const config = effectiveConfig(firmware, device, name);
-	const fieldsOf = (scope: string): Field[] =>
-		(scope.startsWith('feature:')
-			? resolve(config).features.find((f) => `feature:${f.def.id}` === scope)?.def.fields
-			: resolve(config).peripherals.find((s) => `peripheral:${s.instance.uid}` === scope)?.def
-					.fields) ?? [];
-	const issues = validate(config, resolve(config), 'device').filter((i) => {
-		if (!i.scope || !i.field) return false;
-		const field = fieldsOf(i.scope).find((f) => f.key === i.field);
-		return !!field && isPerDevice(field);
-	});
-	if (KINDS[config.kind].matterDevice && !validPasscode(device.matter.passcode))
+	const id = (i: Issue) => [i.severity, i.scope, i.field, i.message].join('|');
+	const known = new Set(validate(firmware).map(id));
+	const issues = validate(effectiveConfig(firmware, device, name)).filter((i) => !known.has(id(i)));
+	if (KINDS[firmware.kind].matterDevice && !validPasscode(device.matter.passcode))
 		issues.push({
 			severity: 'error',
 			scope: 'device',

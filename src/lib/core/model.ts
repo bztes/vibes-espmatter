@@ -21,7 +21,7 @@ export interface MatterProduct {
 	productId: number;
 }
 
-/** The firmware: boards, features and peripherals. Per-device fields hold the defaults of its devices. */
+/** The firmware: boards, features and peripherals. Settings hold firmware fields only. */
 export interface FirmwareConfig {
 	schema: 2;
 	kind: DeviceKind;
@@ -59,8 +59,8 @@ export interface DeviceSettings {
 	 */
 	uiPasswordHash: string;
 	/**
-	 * Values of per-device plugin fields set for this device, by scope (`feature:<id>`,
-	 * `peripheral:<uid>`). Missing ones come from the firmware.
+	 * Values of the per-device fields of the firmware's plugins, by scope (`feature:<id>`,
+	 * `peripheral:<uid>`). All of them: there are no defaults on the firmware.
 	 */
 	plugins: Record<string, Settings>;
 }

@@ -8,6 +8,7 @@
 		disableFeature,
 		enableFeature,
 		featuresFor,
+		firmwareFields,
 		removePeripheral,
 		setBoard,
 		type Resolved
@@ -159,10 +160,10 @@
 			{/each}
 		</div>
 		{#each transports.filter((f) => f.id in config.features) as f (f.id)}
-			{#if f.fields?.length}
+			{#if firmwareFields(f.fields).length}
 				<div id="feature:{f.id}" class="mt-5 border-t border-border pt-5">
 					<SettingsFields
-						fields={f.fields}
+						fields={firmwareFields(f.fields)}
 						settings={config.features[f.id]}
 						{config}
 						{resolved}
@@ -244,7 +245,7 @@
 							>
 						</div>
 						<SettingsFields
-							fields={s.def.fields}
+							fields={firmwareFields(s.def.fields)}
 							settings={config.peripherals.find((x) => x.uid === s.instance.uid)!.settings}
 							{config}
 							{resolved}
@@ -296,10 +297,10 @@
 							onchange={(v) => toggle(f, v)}
 						/>
 					</div>
-					{#if on && (f.fields?.length || scoped(scope).length)}
+					{#if on && (firmwareFields(f.fields).length || scoped(scope).length)}
 						<div class="mt-4 ml-12">
 							<SettingsFields
-								fields={f.fields}
+								fields={firmwareFields(f.fields)}
 								settings={config.features[f.id]}
 								{config}
 								{resolved}

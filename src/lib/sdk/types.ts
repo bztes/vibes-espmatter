@@ -148,10 +148,10 @@ interface FieldBase<T> {
 	/** Advanced settings are collapsed by default. */
 	advanced?: boolean;
 	/**
-	 * Set per device, not compiled into the firmware: the value is stored in the device's
-	 * configuration (NVS) and read at runtime – in `contribute()` use `ctx.cfg(key)`, a C
-	 * expression, instead of the value. The firmware's value is the default for its devices.
-	 * For tweaks only (intervals, offsets, credentials …): whatever changes the firmware's
+	 * Set per device, not compiled into the firmware: the firmware has no value for it, each device
+	 * its own (starting at `default`), stored in its configuration (NVS) and read at runtime – in
+	 * `contribute()` use `ctx.cfg(key)`, a C expression. Firmware fields decide (`when`) which of
+	 * them a device has. For tweaks only (intervals, offsets, credentials …): whatever changes the firmware's
 	 * structure – pins, sensor models, options that add code or pages – stays per firmware.
 	 * Keys of per-device fields are at most 15 characters (an NVS key).
 	 */
@@ -425,8 +425,8 @@ export interface FlashOverWire {
 
 export interface PluginContext<S extends Settings = Settings> {
 	/**
-	 * The settings. Per-device fields hold the firmware's default in `contribute()` (read the
-	 * device's value with `cfg`), and the device's value when a device is validated.
+	 * The settings. Per-device fields are missing on a firmware (read them with `cfg`), and hold
+	 * the device's value when a device is validated.
 	 */
 	settings: S;
 	/** The firmware's name (`kind`: what it is). Devices have names of their own. */
@@ -434,7 +434,7 @@ export interface PluginContext<S extends Settings = Settings> {
 	/**
 	 * The per-device value of a field marked `perDevice`, as a C expression that reads it from
 	 * the device's configuration at runtime (a `const char *`, `int`, `double` or `bool`, by field
-	 * type), falling back to the firmware's value.
+	 * type), falling back to the field's default.
 	 */
 	cfg(key: string): CExpr;
 	/** The board of a slot (`main` by default). */

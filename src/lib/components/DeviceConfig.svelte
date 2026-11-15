@@ -4,8 +4,8 @@
 	import EyeOff from '@lucide/svelte/icons/eye-off';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { untrack } from 'svelte';
-	import { slug, type Issue, type SettingValue } from '#sdk';
-	import { effectiveValue, PASSWORD_SET, perDeviceScopes } from '#lib/core/device.ts';
+	import { slug, type Issue } from '#sdk';
+	import { PASSWORD_SET, perDeviceScopes } from '#lib/core/device.ts';
 	import { randomPassword, resolve as resolveConfig } from '#lib/core/engine.ts';
 	import { KINDS } from '#lib/core/kinds.ts';
 	import {
@@ -79,7 +79,6 @@
 	});
 	const matter = $derived(KINDS[device.kind].matterDevice);
 	const scopes = $derived(perDeviceScopes(firmware));
-	const effectiveScopes = $derived(perDeviceScopes(effective));
 	const code = $derived(manualPairingCode(settings.matter.discriminator, settings.matter.passcode));
 	const qr = $derived(
 		qrPayload(
@@ -147,17 +146,11 @@
 		}
 	}
 
-	function setValue(scope: string, key: string, value: SettingValue) {
-		(settings.plugins[scope] ??= {})[key] = value;
-	}
-	function resetValue(scope: string, key: string) {
-		const values = settings.plugins[scope];
-		if (!values) return;
-		delete values[key];
-		if (!Object.keys(values).length) delete settings.plugins[scope];
-	}
-	const origin = (scope: string, key: string, firmwareValue: SettingValue) =>
-		effectiveValue(scope, key, firmwareValue, settings).from;
+	/** The plugin's settings as this device sees them: `when` may depend on firmware fields. */
+	const settingsOf = (scope: string) =>
+		scope.startsWith('feature:')
+			? effective.features[scope.slice('feature:'.length)]
+			: effective.peripherals.find((p) => `peripheral:${p.uid}` === scope)!.settings;
 	const scoped = (scope: string) => issues.filter((i) => i.scope === scope);
 </script>
 
@@ -312,22 +305,16 @@
 			<h2 class="m-0 text-sm font-semibold text-muted">Features</h2>
 			<div class="grid gap-6 lg:grid-cols-2">
 				{#each scopes as s (s.scope)}
-					{@const values = effectiveScopes.find((e) => e.scope === s.scope)!.settings}
-					<Card
-						title={s.name}
-						description="This device’s values – defaults come from the firmware."
-					>
+					<Card title={s.name}>
 						<div id={s.scope}>
 							<SettingsFields
 								fields={s.fields}
-								settings={values}
+								settings={settingsOf(s.scope)}
 								config={effective}
 								{resolved}
 								{issues}
 								scope={s.scope}
-								onset={(key, v) => setValue(s.scope, key, v)}
-								origin={(key) => origin(s.scope, key, s.settings[key])}
-								onreset={(key) => resetValue(s.scope, key)}
+								onset={(key, v) => (settings.plugins[s.scope][key] = v)}
 							/>
 							{#if scoped(s.scope).some((i) => !i.field)}<div class="mt-3">
 									<IssueList issues={scoped(s.scope).filter((i) => !i.field)} compact />
