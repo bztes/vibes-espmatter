@@ -26,7 +26,7 @@ import {
 	type SlotReport
 } from './db/schema.ts';
 import { withContext, type DeviceContext, type DeviceRow } from './devices.ts';
-import { tunnelConnected, tunnelFetch } from './tunnel/core.ts';
+import { deviceConnection, deviceFetch } from './tunnel/core.ts';
 
 export const OPEN_STATES: DeployState[] = ['pending', 'downloading', 'installing'];
 
@@ -214,9 +214,12 @@ export async function setDeploymentState(id: string, state: DeployState, message
  * are waiting. Undefined when it did; else why not – it then asks at its next periodic check.
  */
 export async function nudge(dev: DeviceRow): Promise<string | undefined> {
-	if (!tunnelConnected(dev.id)) return 'it isn’t connected to the app (Remote access feature)';
+	if (!deviceConnection(dev))
+		return dev.hubId
+			? 'neither it nor its hub is connected to the app (Remote access feature)'
+			: 'it isn’t connected to the app (Remote access feature)';
 	try {
-		const res = await tunnelFetch(dev.id, {
+		const res = await deviceFetch(dev, {
 			method: 'POST',
 			path: '/api/v1/ota/check',
 			headers: { authorization: `Bearer ${boardToken(dev)}` }

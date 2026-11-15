@@ -66,6 +66,8 @@
 	const route = $derived(updateRoute(resolved));
 	/** The device keeps a tunnel to the app: reachable at its own hostname, from anywhere. */
 	const remote = $derived(resolved.has('remote-access'));
+	/** A Thread device: the app reaches it through its hub's tunnel. */
+	const viaHub = $derived(!remote && route === 'hub');
 	const matter = $derived(KINDS[device.kind].matterDevice);
 	const scopes = $derived(perDeviceScopes(firmware));
 	const effectiveScopes = $derived(perDeviceScopes(effective));
@@ -390,11 +392,11 @@
 							/>
 						</Field>
 					{/if}
-					{#if device.kind === 'device' && route === 'hub' && settings.updates.pull}
+					{#if device.kind === 'device' && route === 'hub'}
 						<Field
-							label="Hub for updates"
+							label="Hub"
 							id="hub"
-							help="Thread device: its updates come through this hub."
+							help="Thread device: its updates come through this hub, and the app reaches it through the hub."
 						>
 							<Select
 								id="hub"
@@ -421,7 +423,13 @@
 				description="Its web interface and REST API at a hostname of its own, from anywhere: the device keeps a connection to this app, and the app passes requests on. Login is the device’s own."
 			>
 				<div class="grid gap-4">
-					{#if !remote}
+					{#if viaHub}
+						<p class="m-0 text-sm text-muted">
+							Through its hub: the hub’s connection to the app and its <strong>Update relay</strong>
+							pass requests on. The hub learns the device’s address at its first update check.
+						</p>
+						{#if !device.hub}<Notice tone="warn">Pick its hub under Updates.</Notice>{/if}
+					{:else if !remote}
 						<p class="m-0 text-sm text-muted">
 							Off – enable the <strong>Remote access</strong> feature in the firmware{device.kind ===
 							'device'
@@ -431,7 +439,7 @@
 					{/if}
 					{#if device.url}
 						<div class="flex flex-wrap items-center gap-2 text-sm">
-							{#if remote}
+							{#if remote || viaHub}
 								<Badge tone={device.connectedSince ? 'ok' : 'warn'}
 									>{device.connectedSince ? 'connected' : 'offline'}</Badge
 								>
@@ -453,7 +461,7 @@
 						<label for="subdomain" class="text-sm font-medium">Hostname</label>
 						<div class="flex gap-2">
 							<Input id="subdomain" mono maxlength={63} bind:value={subdomain} />
-							{#if remote}
+							{#if remote || viaHub}
 								<Button
 									variant="ghost"
 									disabled={!device.connectedSince}
@@ -468,7 +476,10 @@
 									>{probe.online ? 'answers' : 'no answer'}</Badge
 								>{/if}
 							<span
-								>{#if device.connectedSince}Connected {relativeTime(device.connectedSince)}.{/if}
+								>{#if device.connectedSince}{device.connectedVia === 'hub'
+										? 'Its hub connected'
+										: 'Connected'}
+									{relativeTime(device.connectedSince)}.{/if}
 								With the connection the app also asks the device to check for updates right away after
 								you install a build or save settings.</span
 							>

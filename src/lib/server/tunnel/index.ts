@@ -8,9 +8,15 @@ import { db } from '../db/index.ts';
 import { device } from '../db/schema.ts';
 import { deviceFromToken } from '../deploy.ts';
 import { getSetting } from '../settings.ts';
-import { MAX_BODY, TunnelError, onTunnel, setTunnelAuth, tunnelFetch } from './core.ts';
+import { MAX_BODY, TunnelError, deviceFetch, onTunnel, setTunnelAuth } from './core.ts';
 
-export { tunnelConnected, tunnelFetch, TunnelError } from './core.ts';
+export {
+	deviceConnection,
+	deviceFetch,
+	tunnelConnected,
+	tunnelFetch,
+	TunnelError
+} from './core.ts';
 
 /** Called once at startup (hooks `init`). */
 export function initTunnels() {
@@ -181,7 +187,7 @@ export async function routeDeviceHost(event: RequestEvent): Promise<Response | u
 
 	// A device's hostname is its subdomain below the host of its app URL – anything else is the app.
 	const [dev] = await db
-		.select({ id: device.id, settings: device.settings })
+		.select({ id: device.id, hubId: device.hubId, settings: device.settings })
 		.from(device)
 		.where(eq(device.subdomain, label));
 	if (!dev || (await deviceDomain(dev.settings.appUrl)).domain !== host.slice(dot + 1))
@@ -220,7 +226,7 @@ export async function routeDeviceHost(event: RequestEvent): Promise<Response | u
 	}
 	try {
 		// HEAD as GET: the device's HTTP client would wait for the body a HEAD answer announces.
-		const res = await tunnelFetch(dev.id, {
+		const res = await deviceFetch(dev, {
 			method: method === 'HEAD' ? 'GET' : method,
 			path,
 			headers,

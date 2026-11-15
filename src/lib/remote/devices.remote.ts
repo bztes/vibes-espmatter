@@ -21,8 +21,8 @@ import {
 	deviceUrl,
 	ensureSubdomain,
 	freeSubdomain,
-	tunnelConnected,
-	tunnelFetch,
+	deviceConnection,
+	deviceFetch,
 	validSubdomain
 } from '#lib/server/tunnel/index.ts';
 import { deviceName, deviceSettings, uuid } from './schemas.ts';
@@ -73,8 +73,8 @@ export const listDevices = query(async () => {
 				peripherals: config.peripherals.map((s) => ({ peripheral: s.peripheral, name: s.name })),
 				errors: issues.filter((i) => i.severity === 'error').length,
 				url: await deviceUrl(row.subdomain, settings.appUrl),
-				/** Connected to the app through its tunnel right now. */
-				connected: !!tunnelConnected(row.id),
+				/** Reachable by the app right now (its own tunnel or its hub's). */
+				connected: !!deviceConnection(row),
 				lastSeenAt: row.lastSeenAt,
 				running: row.reported.main?.running,
 				/** The newest successful build of its firmware. */
@@ -122,8 +122,9 @@ export const getDevice = query(uuid, async (id) => {
 		subdomain,
 		/** Its own hostname, through the tunnel (remote-access feature). */
 		url: await deviceUrl(subdomain, dev.settings.appUrl),
-		/** Since when its tunnel is up; null: not connected. */
-		connectedSince: tunnelConnected(dev.id) ?? null,
+		/** Since when the app reaches it, and how (its own tunnel, or its hub's); null: not at all. */
+		connectedSince: deviceConnection(dev)?.since ?? null,
+		connectedVia: deviceConnection(dev)?.via ?? null,
 		lastSeenAt: dev.lastSeenAt,
 		reported: dev.reported,
 		/** Revision of the configuration the device should have. */
@@ -321,12 +322,12 @@ export const listHubs = query(v.nullable(uuid), async (locationId) => {
 		);
 });
 
-/** Is the device answering through its tunnel? */
+/** Is the device answering (through its tunnel or its hub's)? */
 export const probeDevice = command(uuid, async (id) => {
 	const row = await ownedDevice(id);
-	if (!tunnelConnected(id)) return { online: false, info: null };
+	if (!deviceConnection(row)) return { online: false, info: null };
 	try {
-		const res = await tunnelFetch(id, {
+		const res = await deviceFetch(row, {
 			method: 'GET',
 			path: '/api/v1/info',
 			headers: { authorization: `Bearer ${boardToken(row)}` }

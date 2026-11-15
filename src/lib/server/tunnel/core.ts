@@ -13,6 +13,9 @@
  *   with `n` > 0 followed by one binary frame: 4-byte id (big endian) + the body.
  * - device → app, text: `{"t":"res","id":7,"s":200,"h":{…}}`, then binary frames (4-byte id +
  *   a chunk of the body), then `{"t":"end","id":7}` – or `{"t":"err","id":7,"e":"…"}` at any point.
+ *
+ * Devices without a tunnel of their own (Thread) are reached through their hub's: its update relay
+ * passes `/api/v1/relay/forward/<id>/<path>` on to the device (`deviceFetch`).
  */
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -281,4 +284,35 @@ export function tunnelFetch(deviceId: string, req: TunnelRequest): Promise<Respo
 			conn.ws.send(frame, { binary: true });
 		}
 	});
+}
+
+/** A device and the hub that relays for it. */
+export interface Reachable {
+	id: string;
+	hubId?: string | null;
+}
+
+/** How the app reaches a device right now: its own tunnel, its hub's, or not at all. */
+export function deviceConnection(dev: Reachable): { via: 'tunnel' | 'hub'; since: Date } | null {
+	const own = tunnelConnected(dev.id);
+	if (own) return { via: 'tunnel', since: own };
+	const hub = dev.hubId ? tunnelConnected(dev.hubId) : undefined;
+	return hub ? { via: 'hub', since: hub } : null;
+}
+
+/** Send a request to a device: through its own tunnel, else through its hub's update relay. */
+export async function deviceFetch(dev: Reachable, req: TunnelRequest): Promise<Response> {
+	const via = deviceConnection(dev);
+	if (via?.via !== 'hub') return tunnelFetch(dev.id, req);
+	const res = await tunnelFetch(dev.hubId!, {
+		...req,
+		path: `/api/v1/relay/forward/${dev.id}${req.path}`
+	});
+	// The hub learns a device's address from its update checks through the relay.
+	if (res.status === 421)
+		throw new TunnelError(
+			'The hub doesn’t know where the device is yet – it learns that at the device’s next update check.',
+			503
+		);
+	return res;
 }

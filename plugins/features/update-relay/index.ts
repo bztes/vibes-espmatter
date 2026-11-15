@@ -5,7 +5,7 @@ export default defineFeature({
 	id: 'update-relay',
 	name: 'Update relay',
 	description:
-		'Lets Thread devices – which can’t reach the app themselves – pull firmware updates through the hub. The hub proxies manifests and images from the app and announces itself via DNS-SD.',
+		'Lets Thread devices – which can’t reach the app themselves – pull firmware updates through the hub, and the app reach them through the hub’s connection. The hub proxies manifests and images from the app and announces itself via DNS-SD.',
 	icon: 'refresh-cw',
 	kinds: ['hub'],
 	needs: ['uplink', 'thread-network'],
@@ -42,6 +42,14 @@ export default defineFeature({
 				method: 'POST',
 				path: '/api/v1/relay/devices/*',
 				summary: 'Update report of a Thread device (forwarded to the app)',
+				auth: 'public'
+			},
+			{
+				method: 'GET',
+				path: '/api/v1/relay/forward/*',
+				summary: 'A request for a Thread device (`/api/v1/relay/forward/<id>/<path>`)',
+				description:
+					'Passed on to `<path>` of the device, also as POST, PUT and DELETE. The hub knows a device’s address from its update checks through the relay (421 until then). The device’s own token is passed on – the hub adds no authority of its own.',
 				auth: 'public'
 			},
 			{
