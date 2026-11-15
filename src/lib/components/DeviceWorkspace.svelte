@@ -100,7 +100,7 @@
 		<a
 			href={device.location ? `${path('/(app)')}?location=${device.location.id}` : path('/(app)')}
 			class="mb-3 inline-flex items-center gap-1 text-xs text-muted no-underline hover:text-fg"
-			><ArrowLeft size={14} />{device.location?.name ?? 'Devices'}</a
+			><ArrowLeft size={14} />{device.location?.name ?? 'Firmware'}</a
 		>
 		<div class="flex flex-wrap items-center gap-4">
 			<div

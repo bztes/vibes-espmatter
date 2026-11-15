@@ -13,18 +13,6 @@
 	let { children }: LayoutProps = $props();
 
 	const me = $derived(await getMe());
-	const nav = $derived([
-		{
-			href: resolve('/(app)'),
-			label: 'Devices',
-			active: page.url.pathname === '/' || page.url.pathname.startsWith('/devices')
-		},
-		{
-			href: resolve('/(app)/firmware'),
-			label: 'Firmware',
-			active: page.url.pathname.startsWith('/firmware')
-		}
-	]);
 
 	let menuOpen = $state(false);
 	let menuEl = $state<HTMLElement>();
@@ -53,17 +41,6 @@
 	<header class="sticky top-0 z-30 border-b border-border bg-surface/85 backdrop-blur">
 		<div class="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6">
 			<a href={resolve('/(app)')} class="no-underline"><Logo /></a>
-			<nav class="flex gap-1">
-				{#each nav as item (item.href)}
-					<a
-						href={item.href}
-						class={[
-							'rounded-lg px-3 py-1.5 text-sm font-medium no-underline',
-							item.active ? 'bg-surface-2 text-fg' : 'text-muted hover:text-fg'
-						]}>{item.label}</a
-					>
-				{/each}
-			</nav>
 			{#if me}
 				<div class="relative ml-auto" bind:this={menuEl}>
 					<button

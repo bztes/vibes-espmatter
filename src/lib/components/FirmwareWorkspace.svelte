@@ -127,7 +127,7 @@
 	<div class="mx-auto max-w-7xl px-4 pt-5 sm:px-6">
 		<!-- eslint-disable svelte/no-navigation-without-resolve -- built with resolve() -->
 		<a
-			href={path('/(app)/firmware')}
+			href={path('/(app)')}
 			class="mb-3 inline-flex items-center gap-1 text-xs text-muted no-underline hover:text-fg"
 			><ArrowLeft size={14} />Firmware</a
 		>

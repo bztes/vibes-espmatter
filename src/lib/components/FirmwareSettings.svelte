@@ -92,7 +92,7 @@
 				onaction={() =>
 					run(async () => {
 						await deleteFirmware(firmware.id);
-						await goto(resolve('/(app)/firmware'));
+						await goto(resolve('/(app)'));
 					})}
 			/>
 		</div>
