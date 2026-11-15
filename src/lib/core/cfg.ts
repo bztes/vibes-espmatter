@@ -76,9 +76,7 @@ export const PLATFORM_KEYS = {
 	disc: 'int',
 	passcode: 'int',
 	qr: 'str',
-	manual: 'str',
-	/** Revision of the whole configuration: reported back, so the app knows what a device has. */
-	rev: 'str'
+	manual: 'str'
 } as const satisfies Record<string, CfgType>;
 
 export const platformCfg = (key: keyof typeof PLATFORM_KEYS, fallback: SettingValue) =>

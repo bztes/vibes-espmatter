@@ -1,4 +1,4 @@
-<!-- The Firmware tab of a device: which firmware it runs, and installing its builds – over USB, or released for the device to pull (directly or through its hub) -->
+<!-- The Firmware tab of a device: which firmware it runs, and installing its builds – over USB, or released for the device to pull (directly or through its hub). -->
 <script lang="ts">
 	import Download from '@lucide/svelte/icons/download';
 	import Radio from '@lucide/svelte/icons/radio';
@@ -8,6 +8,7 @@
 	import { buildState, listBuilds } from '#lib/remote/builds.remote.ts';
 	import { deploy, deployments, cancelDeployment } from '#lib/remote/deploy.remote.ts';
 	import { resolve as resolveConfig } from '#lib/core/engine.ts';
+	import type { DeviceSettings } from '#lib/core/model.ts';
 	import type { getDevice } from '#lib/remote/devices.remote.ts';
 	import { Badge, Button, button, Card, Notice, relativeTime, Select } from '#lib/ui/index.ts';
 	import ChangeFirmwareDialog from './ChangeFirmwareDialog.svelte';
@@ -15,13 +16,11 @@
 
 	let {
 		device,
-		blocked,
-		dirty
+		draft
 	}: {
 		device: Awaited<ReturnType<typeof getDevice>>;
-		/** The device's settings have errors: no build with them can be flashed. */
-		blocked?: string;
-		dirty: boolean;
+		/** Settings for a board that has none yet, written with its first USB flash. */
+		draft?: { settings: DeviceSettings; password: string };
 	} = $props();
 
 	const fw = $derived(resolveConfig(device.firmware.config));
@@ -50,7 +49,6 @@
 		hub: 'via hub',
 		push: 'push'
 	};
-	const { updates } = $derived(device.settings);
 
 	async function install(buildId: string, slot: string, method: 'usb' | 'ota') {
 		error = '';
@@ -65,7 +63,6 @@
 <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
 	<div class="grid min-w-0 content-start gap-6">
 		{#if error}<Notice tone="err">{error}</Notice>{/if}
-		{#if blocked}<Notice tone="err">{blocked}</Notice>{/if}
 
 		<Card title="Firmware" description="What the device runs.">
 			{#snippet actions()}
@@ -125,11 +122,9 @@
 					{#each s.slots as a (a.slot)}
 						{@const why = !a.ota
 							? undefined
-							: !updates.pull
-								? 'Updates from the app are off for this device.'
-								: a.ota === 'hub' && !device.hub
-									? 'Assign a hub under Settings.'
-									: undefined}
+							: a.ota === 'hub' && !device.hub
+								? 'Assign a hub under Settings.'
+								: undefined}
 						<div class="rounded-xl border border-border p-4">
 							<div class="flex flex-wrap items-center justify-between gap-3">
 								<div>
@@ -144,16 +139,30 @@
 										{a.chip} · {a.flashSize} flash · app {(a.appSize / 1024).toFixed(0)} KB
 									</div>
 								</div>
-								<a
-									class={button({ size: 'sm', variant: 'ghost', class: 'no-underline' })}
-									href="{resolve('/api/v1/firmware/[build]/[slot]/[file]', {
-										build: s.id,
-										slot: a.slot,
-										file: a.merged
-									})}?download{a.config ? `&device=${device.id}` : ''}"
-									title={a.config ? 'With this device’s settings' : undefined}
-									data-sveltekit-reload><Download size={15} />merged.bin</a
-								>
+								<div class="flex gap-2">
+									<a
+										class={button({ size: 'sm', variant: 'ghost', class: 'no-underline' })}
+										href="{resolve('/api/v1/firmware/[build]/[slot]/[file]', {
+											build: s.id,
+											slot: a.slot,
+											file: a.merged
+										})}?download"
+										title="Whole flash image, at 0x0{a.config
+											? ' – without the device’s settings'
+											: ''}"
+										data-sveltekit-reload><Download size={15} />merged.bin</a
+									>
+									<a
+										class={button({ size: 'sm', variant: 'ghost', class: 'no-underline' })}
+										href="{resolve('/api/v1/firmware/[build]/[slot]/[file]', {
+											build: s.id,
+											slot: a.slot,
+											file: a.app
+										})}?download"
+										title="The app only, for a board that already runs this firmware"
+										data-sveltekit-reload><Download size={15} />app.bin</a
+									>
+								</div>
 							</div>
 							<div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
 								<span class="text-muted">Install</span>
@@ -188,9 +197,7 @@
 										slot={a.slot}
 										artifacts={a}
 										deviceId={device.id}
-										blocked={a.config
-											? (blocked ?? (dirty ? 'Saving the settings…' : undefined))
-											: undefined}
+										{draft}
 									/>
 								</div>{/if}
 						</div>

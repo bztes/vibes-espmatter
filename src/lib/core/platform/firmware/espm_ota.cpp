@@ -1,8 +1,8 @@
 // espmatter studio – firmware updates: pulled from the app or through a hub's relay, rollback guard.
 // The device asks every ESPM_UPDATE_INTERVAL_MIN minutes, or at once when the app calls
-// POST /api/v1/ota/check. The device configuration comes the same way: the manifest names the
-// current revision and the device fetches `config.bin`. Compiled in when the network allows it;
-// each device switches it on or off in its configuration (ESPM_UPDATE_PULL_ON).
+// POST /api/v1/ota/check. Compiled in when the network allows it; each device switches it on or
+// off in its configuration (ESPM_UPDATE_PULL_ON). The app writes the configuration itself
+// (PUT /api/v1/config, espm_cfg.cpp).
 #include "espm.h"
 
 #include <stdlib.h>
@@ -128,23 +128,15 @@ static bool have_pull_base()
     return pull_base()[0] != 0;
 }
 
-/**
- * Tell the app what runs on a slot and how an update went. The main board's report also carries
- * its configuration revision.
- */
+/** Tell the app what runs on a slot and how an update went. */
 void espm_update_report(const char *slot, const char *state, int version, int running, const char *message)
 {
     char url[256], body[320];
     const char *base = report_base();
     if (!base[0]) return;
     snprintf(url, sizeof(url), "%s/devices/%s/report", base, ESPM_DEVICE_ID);
-    if (strcmp(slot, ESPM_SLOT) == 0)
-        snprintf(body, sizeof(body),
-                 "{\"slot\":\"%s\",\"state\":\"%s\",\"version\":%d,\"running\":%d,\"config\":\"%s\",\"message\":\"%s\"}",
-                 slot, state, version, running, ESPM_CFG_REV, message ? message : "");
-    else
-        snprintf(body, sizeof(body), "{\"slot\":\"%s\",\"state\":\"%s\",\"version\":%d,\"running\":%d,\"message\":\"%s\"}",
-                 slot, state, version, running, message ? message : "");
+    snprintf(body, sizeof(body), "{\"slot\":\"%s\",\"state\":\"%s\",\"version\":%d,\"running\":%d,\"message\":\"%s\"}",
+             slot, state, version, running, message ? message : "");
     esp_http_client_config_t cfg = {};
     cfg.url = url;
     cfg.method = HTTP_METHOD_POST;
@@ -219,16 +211,12 @@ esp_http_client_handle_t espm_update_open(const char *url, int64_t *length)
     return nullptr;
 }
 
-/**
- * 204: nothing to do; 200: `{"version": n, "url": "…"}` for a new firmware and/or
- * `{"config": "<rev>"}` when the app has another configuration for this device.
- */
-static bool fetch_manifest(int *version, char *image_url, size_t len, bool *config)
+/** 204: nothing to do; 200: `{"version": n, "url": "…"}` for a new firmware. */
+static bool fetch_manifest(int *version, char *image_url, size_t len)
 {
     char url[256];
-    *config = false;
-    snprintf(url, sizeof(url), "%s/devices/%s/update?slot=%s&version=%d&config=%s", pull_base(), ESPM_DEVICE_ID,
-             ESPM_SLOT, ESPM_FW_VERSION, ESPM_CFG_REV);
+    snprintf(url, sizeof(url), "%s/devices/%s/update?slot=%s&version=%d", pull_base(), ESPM_DEVICE_ID, ESPM_SLOT,
+             ESPM_FW_VERSION);
     esp_http_client_config_t cfg = {};
     cfg.url = url;
     cfg.timeout_ms = 10000;
@@ -244,15 +232,10 @@ static bool fetch_manifest(int *version, char *image_url, size_t len, bool *conf
             cJSON *json = n > 0 ? cJSON_Parse(buf) : nullptr;
             cJSON *v = cJSON_GetObjectItem(json, "version");
             cJSON *u = cJSON_GetObjectItem(json, "url");
-            cJSON *c = cJSON_GetObjectItem(json, "config");
             if (cJSON_IsNumber(v) && cJSON_IsString(u)) {
                 *version = (int)v->valuedouble;
                 strlcpy(image_url, u->valuestring, len);
                 found = *version != ESPM_FW_VERSION;
-            }
-            if (cJSON_IsString(c) && strcmp(c->valuestring, ESPM_CFG_REV) != 0) {
-                *config = true;
-                found = true;
             }
             cJSON_Delete(json);
         }
@@ -263,59 +246,17 @@ static bool fetch_manifest(int *version, char *image_url, size_t len, bool *conf
     return found;
 }
 
-/** Download this device's configuration (`config.bin`) and install it. */
-static bool pull_config()
-{
-    size_t size = espm_cfg_size();
-    if (!size) return false;
-    char url[256];
-    snprintf(url, sizeof(url), "%s/devices/%s/config.bin", pull_base(), ESPM_DEVICE_ID);
-    esp_http_client_config_t cfg = {};
-    cfg.url = url;
-    cfg.timeout_ms = 10000;
-    tls(cfg);
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    esp_http_client_set_header(client, "Authorization", s_bearer);
-    uint8_t *image = (uint8_t *)malloc(size);
-    esp_err_t err = ESP_FAIL;
-    if (image && esp_http_client_open(client, 0) == ESP_OK) {
-        int64_t length = esp_http_client_fetch_headers(client);
-        if (esp_http_client_get_status_code(client) == 200 && length == (int64_t)size) {
-            int total = 0, n;
-            while (total < (int)size && (n = esp_http_client_read(client, (char *)image + total, size - total)) > 0)
-                total += n;
-            err = total == (int)size ? espm_cfg_write(image, size) : ESP_ERR_INVALID_SIZE;
-        }
-    }
-    esp_http_client_cleanup(client);
-    free(image);
-    if (err != ESP_OK) {
-        set_error("configuration download failed");
-        report("failed", ESPM_FW_VERSION, s_error);
-        return false;
-    }
-    ESP_LOGI(TAG, "New configuration installed – restarting");
-    restart_soon();
-    return true;
-}
-
 static void pull_once()
 {
     s_last_check = esp_timer_get_time() / 1000000;
     if (!have_pull_base()) return;
     int version = 0;
     char image[256] = {};
-    bool config = false;
-    if (!fetch_manifest(&version, image, sizeof(image), &config)) {
+    if (!fetch_manifest(&version, image, sizeof(image))) {
 #if ESPM_SLOTFLASH
         // Boards flashed over a wire: an update for one of them means a restart (the wires are in use).
         espm_slotflash_check();
 #endif
-        return;
-    }
-    // The configuration first: the device restarts with it and asks again for the firmware.
-    if (config) {
-        pull_config();
         return;
     }
     if (version == ESPM_FW_VERSION || !image[0]) return;
@@ -375,7 +316,6 @@ static esp_err_t status(httpd_req_t *req)
 {
     cJSON *json = cJSON_CreateObject();
     cJSON_AddNumberToObject(json, "version", ESPM_FW_VERSION);
-    cJSON_AddStringToObject(json, "config", ESPM_CFG_REV);
     cJSON_AddBoolToObject(json, "pull", ESPM_UPDATE_PULL && ESPM_UPDATE_PULL_ON);
     const esp_partition_t *running = esp_ota_get_running_partition();
     cJSON_AddStringToObject(json, "partition", running ? running->label : "");

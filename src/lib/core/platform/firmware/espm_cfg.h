@@ -1,5 +1,5 @@
 // espmatter studio – the device configuration: identity, network and per-device settings, read
-// from the `espm_cfg` NVS partition the app writes (USB flashing, or pulled from the app). One firmware
+// from the `espm_cfg` NVS partition the app writes (USB flashing, or PUT /api/v1/config). One firmware
 // serves many devices; everything that differs between them is in here.
 #pragma once
 
@@ -25,11 +25,6 @@ bool espm_cfg_bool(const char *ns, const char *key, bool fallback);
 
 /** The configured hostname, else the device name as one: lowercase letters, digits and dashes. */
 const char *espm_hostname(void);
-
-/** Size of the configuration partition (images must have exactly this size), 0 if none. */
-size_t espm_cfg_size(void);
-/** Replace the configuration with an image of the app. Restart afterwards. */
-esp_err_t espm_cfg_write(const uint8_t *image, size_t len);
 
 #ifdef __cplusplus
 }

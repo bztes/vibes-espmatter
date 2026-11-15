@@ -8,11 +8,19 @@ import { db } from '../db/index.ts';
 import { device } from '../db/schema.ts';
 import { deviceFromToken } from '../deploy.ts';
 import { getSetting } from '../settings.ts';
-import { MAX_BODY, TunnelError, deviceFetch, onTunnel, setTunnelAuth } from './core.ts';
+import {
+	MAX_BODY,
+	TunnelError,
+	deviceFetch,
+	deviceOrigin,
+	onTunnel,
+	setTunnelAuth
+} from './core.ts';
 
 export {
 	deviceConnection,
 	deviceFetch,
+	deviceOrigin,
 	tunnelConnected,
 	tunnelFetch,
 	TunnelError
@@ -99,7 +107,7 @@ const isIp = (host: string) => /^[\d.]+$/.test(host) || host.includes(':');
 type DeviceDomain = { domain: string; protocol: string; port: string };
 
 /**
- * Where a device's subdomain lives: the host of the URL it reaches the app at, with its scheme and
+ * The host a subdomain goes below, with its scheme and
  * port (`https://espmatter.app` → `matterhub.espmatter.app`). Without an app URL, or with an IP
  * address, `localhost` with the port of the URL – in development `matterhub.localhost:5173`.
  */
@@ -116,9 +124,10 @@ function domainOf(appUrl: string): DeviceDomain {
 		: { domain: 'localhost', protocol: 'http:', port: url?.port ?? '' };
 }
 
-/** The device domain for an app URL of a device; without one, the admin's public URL. */
+/** The device domain: the public URL's; without a domain name there, the app URL a device uses. */
 export async function deviceDomain(appUrl?: string | null): Promise<DeviceDomain> {
-	return domainOf(appUrl || (await getSetting('publicUrl')));
+	const pub = domainOf(await getSetting('publicUrl'));
+	return pub.domain !== 'localhost' || !appUrl ? pub : domainOf(appUrl);
 }
 
 /** `https://matterhub.espmatter.app` – in development `http://matterhub.localhost:5173`. */
@@ -185,12 +194,12 @@ export async function routeDeviceHost(event: RequestEvent): Promise<Response | u
 	const label = host.slice(0, dot);
 	if (!validSubdomain(label)) return undefined;
 
-	// A device's hostname is its subdomain below the host of its app URL – anything else is the app.
+	// A device's hostname is its subdomain below the device domain – anything else is the app.
 	const [dev] = await db
-		.select({ id: device.id, hubId: device.hubId, settings: device.settings })
+		.select({ id: device.id, hubId: device.hubId })
 		.from(device)
 		.where(eq(device.subdomain, label));
-	if (!dev || (await deviceDomain(dev.settings.appUrl)).domain !== host.slice(dot + 1))
+	if (!dev || (await deviceDomain(deviceOrigin(dev))).domain !== host.slice(dot + 1))
 		return undefined;
 
 	const path = event.url.pathname + event.url.search;

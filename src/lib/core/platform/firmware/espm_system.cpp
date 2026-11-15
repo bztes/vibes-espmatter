@@ -36,7 +36,6 @@ static esp_err_t info(httpd_req_t *req)
     cJSON *fw = cJSON_AddObjectToObject(json, "firmware");
     cJSON_AddNumberToObject(fw, "version", ESPM_FW_VERSION);
     cJSON_AddStringToObject(fw, "build", ESPM_BUILD_ID);
-    cJSON_AddStringToObject(fw, "config", ESPM_CFG_REV);
     cJSON_AddStringToObject(fw, "idf", esp_get_idf_version());
     cJSON_AddStringToObject(json, "chip", CONFIG_IDF_TARGET);
     return espm_send_json(req, json);

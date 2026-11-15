@@ -15,6 +15,13 @@
       "when": 1794557138853,
       "tag": "0001_runner_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794761283862,
+      "tag": "0002_device_settings_on_board",
+      "breakpoints": true
     }
   ]
 }

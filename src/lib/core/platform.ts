@@ -58,6 +58,31 @@ export const CORE_API: ApiRoute[] = [
 		summary: 'Restart the device',
 		auth: 'token',
 		response: { ok: true }
+	},
+	{
+		method: 'GET',
+		path: '/api/v1/config',
+		summary: 'Its settings, as the app reads them',
+		description: 'Only with the API token: the app keeps no copy, it reads them here.',
+		auth: 'token',
+		response: { values: [{ ns: 'espm', key: 'name', value: 'Living room' }] }
+	},
+	{
+		method: 'PUT',
+		path: '/api/v1/config',
+		summary: 'Replace its settings and restart',
+		description: 'Only with the API token. Types as the firmware reads them: str, int, num, bool.',
+		auth: 'token',
+		params: [
+			{
+				name: 'values',
+				type: 'object',
+				description: 'All of them: `[{ns, key, type, value}]`',
+				required: true,
+				in: 'body'
+			}
+		],
+		response: { ok: true }
 	}
 ];
 
@@ -205,7 +230,6 @@ const OTA_STATUS: ApiRoute = {
 	auth: 'token',
 	response: {
 		version: 12,
-		config: '3fa9c01b2d44',
 		pull: true,
 		partition: 'ota_0',
 		state: 'idle',
@@ -263,12 +287,6 @@ const RELAY_API: ApiRoute[] = [
 			'`/api/v1/relay/devices/<id>/update?slot=main&version=<n>`: what the app answers for that device, with the image URL rewritten to the relay. The device’s own token is passed on – the hub adds no authority of its own.',
 		auth: 'public',
 		response: { version: 13, url: 'http://[fd11::1]:80/api/v1/relay/images/<build>/main.bin' }
-	},
-	{
-		method: 'GET',
-		path: '/api/v1/relay/devices/*/config.bin',
-		summary: 'Configuration of a device, streamed from the app',
-		auth: 'public'
 	},
 	{
 		method: 'GET',
@@ -346,7 +364,6 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 				ESPM_MATTER_PASSCODE: platformCfg('passcode', 20202021),
 				ESPM_MATTER_QR: platformCfg('qr', ''),
 				ESPM_MATTER_MANUAL_CODE: platformCfg('manual', ''),
-				ESPM_CFG_REV: platformCfg('rev', ''),
 				ESPM_MATTER_SERVER: matterDevice,
 				ESPM_HTTP: http,
 				// Accounts with roles and per-device grants, managed on the hub itself (espm_users.cpp).

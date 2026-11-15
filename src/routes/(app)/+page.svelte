@@ -74,17 +74,13 @@
 				: status === 'running' || status === 'queued'
 					? 'info'
 					: 'neutral';
-	/** Device firmware state: errors, not installed, outdated, current. */
+	/** Device firmware state: not installed, outdated, current. */
 	const installState = (d: (typeof devices)[number]) =>
-		d.errors
-			? { tone: 'err' as const, text: `${d.errors} error${d.errors > 1 ? 's' : ''}` }
-			: !d.running
-				? { tone: 'neutral' as const, text: 'not installed' }
-				: d.latest && d.running < d.latest
-					? { tone: 'warn' as const, text: `v${d.running} → v${d.latest}` }
-					: d.configOutdated
-						? { tone: 'warn' as const, text: 'settings changed' }
-						: { tone: 'ok' as const, text: `v${d.running}` };
+		!d.running
+			? { tone: 'neutral' as const, text: 'not installed' }
+			: d.latest && d.running < d.latest
+				? { tone: 'warn' as const, text: `v${d.running} → v${d.latest}` }
+				: { tone: 'ok' as const, text: `v${d.running}` };
 	const online = (d: (typeof devices)[number]) =>
 		d.lastSeenAt && Date.now() - new Date(d.lastSeenAt).getTime() < 3 * 3600_000;
 

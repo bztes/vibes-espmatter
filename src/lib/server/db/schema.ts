@@ -7,7 +7,7 @@ import {
 	uniqueIndex,
 	type AnySQLiteColumn
 } from 'drizzle-orm/sqlite-core';
-import type { DeviceSettings, FirmwareConfig } from '#lib/core/model.ts';
+import type { FirmwareConfig } from '#lib/core/model.ts';
 import type { BuildStatus, DeployMethod, DeployState, SlotArtifacts } from '#lib/types.ts';
 
 export type * from '#lib/types.ts';
@@ -64,8 +64,6 @@ export type DeviceKind = 'hub' | 'device';
 /** What a board last told the app (update reports), per slot. */
 export interface SlotReport {
 	running?: number;
-	/** Revision of the device configuration it runs. */
-	config?: string;
 	state?: string;
 	message?: string;
 	at?: number;
@@ -104,7 +102,7 @@ export const firmware = sqliteTable(
 	(t) => [index('firmware_owner_idx').on(t.ownerId)]
 );
 
-/** A board running a firmware; what is its own (identity, per-device values) is in `settings`. */
+/** A board running a firmware. Its settings are on the board only (`/api/v1/config`). */
 export const device = sqliteTable(
 	'device',
 	{
@@ -121,10 +119,9 @@ export const device = sqliteTable(
 		kind: text('kind').$type<DeviceKind>().notNull(),
 		/** Where it lives; null: no location. */
 		locationId: text('location_id').references(() => location.id, { onDelete: 'set null' }),
-		settings: text('settings', { mode: 'json' }).$type<DeviceSettings>().notNull(),
 		/** Bearer token of the device: its REST API, update pulls and reports. */
 		apiToken: text('api_token').notNull(),
-		/** After rotating: the token the board still has, until it runs the new configuration. */
+		/** After rotating: the token the board still has, until it gets its new settings. */
 		previousToken: text('previous_token'),
 		/** Hub the device reaches the app through (updates, access). */
 		hubId: text('hub_id').references((): AnySQLiteColumn => device.id, { onDelete: 'set null' }),

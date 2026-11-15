@@ -1,25 +1,35 @@
-<!-- Flash a slot's images – and the device's configuration – over Web Serial with esptool-js (Chrome/Edge). -->
+<!-- Flash a slot's images – and the device's settings – over Web Serial with esptool-js (Chrome/Edge). A board keeps the settings it has. -->
 <script lang="ts">
 	import Usb from '@lucide/svelte/icons/usb';
 	import { resolve } from '$app/paths';
+	import type { DeviceSettings } from '#lib/core/model.ts';
 	import type { SlotArtifacts } from '#lib/types.ts';
+	import { CFG_PARTITION } from '#lib/core/cfg.ts';
 	import { deploy, reportUsb } from '#lib/remote/deploy.remote.ts';
+	import { usbFlashImage } from '#lib/remote/devices.remote.ts';
 	import { Button, Checkbox, Code, CodeBlock, Notice } from '#lib/ui/index.ts';
-	import type { ESPLoader, Transport } from 'esptool-js';
+	import {
+		connectBoard,
+		findPartition,
+		fromBase64,
+		resetBoard,
+		serialSupported,
+		toBase64
+	} from './serial.ts';
 
 	let {
 		buildId,
 		slot,
 		artifacts,
 		deviceId,
-		blocked
+		draft
 	}: {
 		buildId: string;
 		slot: string;
 		artifacts: SlotArtifacts;
 		deviceId: string;
-		/** Why the configuration can't be written now. */
-		blocked?: string;
+		/** For a board without settings of this device: written with the firmware. */
+		draft?: { settings: DeviceSettings; password: string };
 	} = $props();
 
 	type Status = 'idle' | 'connecting' | 'flashing' | 'done' | 'error';
@@ -29,48 +39,29 @@
 	let eraseAll = $state(false);
 	let log = $state<string[]>([]);
 
-	const supported = typeof navigator !== 'undefined' && 'serial' in navigator;
+	const supported = serialSupported();
 	const busy = $derived(status === 'connecting' || status === 'flashing');
 	const total = $derived(
 		artifacts.parts.reduce((n, p) => n + p.size, 0) + (artifacts.config?.size ?? 0)
 	);
 
-	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-	/** esptool-js' hard reset only releases EN; pull it first so the new firmware starts. */
-	async function reset(transport: Transport) {
-		await transport.setDTR(false);
-		await transport.setRTS(true);
-		await sleep(150);
-		await transport.setRTS(false);
-		await sleep(150);
-	}
-
 	async function flash() {
-		let port: SerialPort;
-		try {
-			port = await navigator.serial.requestPort();
-		} catch {
-			return; // dialog closed
-		}
-		status = 'connecting';
-		progress = 0;
 		log = [];
 		message = 'Connecting – if it hangs, hold BOOT and tap RESET.';
-		const { ESPLoader, Transport } = await import('esptool-js');
-		const transport = new Transport(port, false);
+		status = 'connecting';
+		progress = 0;
+		let board;
+		try {
+			board = await connectBoard((l) => (log = [...log.slice(-150), l]));
+		} catch (err) {
+			status = 'error';
+			message = err instanceof Error ? err.message : String(err);
+			return;
+		}
+		if (!board) return void (status = 'idle'); // dialog closed
+		const { loader, transport, description } = board;
 		let deploymentId: string | undefined;
 		try {
-			const loader: ESPLoader = new ESPLoader({
-				transport,
-				baudrate: 460800,
-				terminal: {
-					clean: () => {},
-					writeLine: (l: string) => (log = [...log.slice(-150), l]),
-					write: (l: string) => (log = [...log.slice(-150), l])
-				}
-			});
-			const description = await loader.main();
 			const detected = loader.chip.CHIP_NAME.toLowerCase().replace(/-/g, '');
 			if (detected !== artifacts.chip)
 				throw new Error(
@@ -96,14 +87,24 @@
 					return { address: part.offset, data: new Uint8Array(await res.arrayBuffer()) };
 				})
 			);
-			// The device's own settings: identity, network, per-device values.
+			// The device's own settings: what the board has (kept), else the ones entered here.
+			let kept = false;
 			if (artifacts.config) {
-				const res = await fetch(resolve('/devices/[id]/config.bin', { id: deviceId }));
-				if (!res.ok) throw new Error(`Download of the device configuration failed (${res.status})`);
-				files.push({
-					address: artifacts.config.offset,
-					data: new Uint8Array(await res.arrayBuffer())
+				message = 'Reading the board’s settings…';
+				// Where the board has them now: the new build may lay out its partitions differently.
+				const where = (await findPartition(loader, CFG_PARTITION)) ?? artifacts.config;
+				const current =
+					where.size === artifacts.config.size
+						? await loader.readFlash(where.offset, where.size)
+						: undefined;
+				const { image, kept: k } = await usbFlashImage({
+					id: deviceId,
+					current: current && toBase64(current),
+					draft: draft?.settings,
+					password: draft?.password || undefined
 				});
+				kept = k;
+				files.push({ address: artifacts.config.offset, data: fromBase64(image) });
 			}
 			status = 'flashing';
 			message = eraseAll ? 'Erasing and writing…' : 'Writing…';
@@ -119,10 +120,12 @@
 					progress = Math.min(1, (before + written) / total);
 				}
 			});
-			await reset(transport);
+			await resetBoard(transport);
 			progress = 1;
 			status = 'done';
-			message = `${artifacts.name} flashed. The board restarts now.`;
+			message = `${artifacts.name} flashed${
+				artifacts.config ? (kept ? ', it keeps its settings' : ', with the settings from here') : ''
+			}. The board restarts now.`;
 			await reportUsb({ id: deploymentId, ok: true, message: 'Flashed over USB.' });
 		} catch (err) {
 			status = 'error';
@@ -146,7 +149,7 @@
 {:else}
 	<div class="grid gap-3">
 		<div class="flex flex-wrap items-center gap-3">
-			<Button variant="primary" onclick={flash} disabled={busy || !!blocked} title={blocked}
+			<Button variant="primary" onclick={flash} disabled={busy}
 				><Usb size={16} />{busy ? 'Flashing…' : `Flash ${artifacts.name}`}</Button
 			>
 			<Checkbox

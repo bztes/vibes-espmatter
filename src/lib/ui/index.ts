@@ -4,6 +4,7 @@ export { default as Dialog } from './Dialog.svelte';
 export { default as CopyButton } from './CopyButton.svelte';
 export { default as Tabs } from './Tabs.svelte';
 export { default as PluginIcon } from './PluginIcon.svelte';
+export { default as UrlInput } from './UrlInput.svelte';
 export {
 	Badge,
 	Button,

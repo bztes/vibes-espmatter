@@ -7,8 +7,7 @@
  *
  * Releasing a build for pull also nudges the device (`POST /api/v1/ota/check`) so it asks right
  * away; when this server can't reach it, it asks at its next periodic check anyway. A device's
- * configuration travels the same ways: written by USB flashing, or pulled when the update
- * manifest names another revision.
+ * settings are written by USB flashing, or by the app through its tunnel (`PUT /api/v1/config`).
  */
 import { timingSafeEqual } from 'node:crypto';
 import { error } from '@sveltejs/kit';
@@ -39,7 +38,7 @@ const same = (a: string, b: string) => {
 
 /**
  * The device a `Authorization: Bearer <token>` header belongs to. After a token rotation the
- * previous token still works until the device runs the configuration with the new one.
+ * previous token still works until the board has its new settings.
  */
 export async function deviceFromToken(request: Request, deviceId?: string) {
 	const header = request.headers.get('authorization') ?? '';
@@ -79,10 +78,11 @@ export function otaMethod(config: FirmwareConfig, slot: string): 'pull' | 'hub' 
 	return appLink(r).updates === 'hub' ? 'hub' : 'pull';
 }
 
-/** Why a device can't get a build over the air (undefined: it can). */
+/**
+ * Why a device can't get a build over the air (undefined: it can). Whether its updates are on is
+ * the board's setting: it tells when nudged.
+ */
 export function blockedOta(dev: DeviceContext, method: 'pull' | 'hub'): string | undefined {
-	if (!dev.settings.updates.pull)
-		return 'Updates from the app are off for this device (Settings → Updates).';
 	if (method === 'hub' && !dev.hubId) return 'Pick its hub under Settings → App link.';
 	return undefined;
 }
@@ -277,19 +277,18 @@ async function setReport(dev: DeviceRow, slot: string, value: SlotReport) {
 }
 
 /** An update check says what runs: note it when the app's record differs (a missed report). */
-export async function noteRunning(dev: DeviceRow, slot: string, running: number, config?: string) {
+export async function noteRunning(dev: DeviceRow, slot: string, running: number) {
 	const known = dev.reported[slot];
-	if (known?.running === running && (config === undefined || known.config === config)) return;
+	if (known?.running === running) return;
 	await setReport(dev, slot, {
 		...known,
 		running,
-		config: config ?? known?.config,
 		state: 'running',
 		message: ''
 	});
 }
 
-/** A device reports what runs (`running`, `config`) and how an update goes. */
+/** A device reports what runs (`running`) and how an update goes. */
 export async function report(
 	dev: DeviceRow,
 	input: {
@@ -297,13 +296,11 @@ export async function report(
 		state: string;
 		version: number;
 		running: number;
-		config?: string;
 		message?: string;
 	}
 ) {
 	await setReport(dev, input.slot, {
 		running: input.running,
-		config: input.config,
 		state: input.state,
 		message: input.message
 	});

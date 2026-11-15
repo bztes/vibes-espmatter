@@ -1,84 +1,130 @@
-<!-- Whether the device runs its current settings, and applying them without a new build. -->
-<script lang="ts">
-	import Download from '@lucide/svelte/icons/download';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import { resolve } from '$app/paths';
-	import { applyDeviceConfig, type getDevice } from '#lib/remote/devices.remote.ts';
-	import { Badge, Button, button, Card, Code, Notice } from '#lib/ui/index.ts';
-
-	let {
-		device,
-		blocked,
-		dirty
-	}: {
-		device: Awaited<ReturnType<typeof getDevice>>;
-		/** The settings have errors: nothing can be applied. */
-		blocked?: string;
-		dirty: boolean;
-	} = $props();
-
-	let applying = $state(false);
-	let applied = $state('');
-	let error = $state('');
-
-	const reportedRev = $derived(device.reported.main?.config);
-	const configState = $derived(
-		!reportedRev ? 'unknown' : reportedRev === device.configRev ? 'current' : 'outdated'
-	);
-	const pull = $derived(device.settings.updates.pull);
-
-	async function apply() {
-		error = '';
-		applied = '';
-		applying = true;
-		try {
-			await applyDeviceConfig(device.id);
-			applied = 'Asked the device to check – it restarts with its new settings.';
-		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
-		} finally {
-			applying = false;
-		}
-	}
+<!-- The Device settings tab's bar: where the settings come from (the board, or entered before its first flash), reading and writing them over the air or over USB. -->
+<script lang="ts" module>
+	/** `board`: read over the air; `usb`: read over USB; `unread`: connected, not asked yet. */
+	export type BoardState = 'unread' | 'loading' | 'board' | 'usb' | 'draft' | 'offline' | 'error';
+	export type Via = 'air' | 'usb';
 </script>
 
-<Card
-	title="Settings on the device"
-	description="The values on this page live in a partition of their own on the device – changing them needs no new build."
->
-	<div class="grid gap-3">
-		<div class="flex flex-wrap items-center gap-2 text-sm">
-			{#if dirty}<Badge tone="info">saving…</Badge>
-			{:else if configState === 'current'}<Badge tone="ok">up to date</Badge>
-			{:else if configState === 'outdated'}<Badge tone="warn">changed since</Badge>
-			{:else}<Badge>unknown</Badge>{/if}
-			<span class="text-muted">
-				{#if configState === 'unknown'}The device hasn’t reported yet – flash it over USB first.
-				{:else if configState === 'outdated'}The device runs revision <Code>{reportedRev}</Code>,
-					the current one is <Code>{device.configRev}</Code>.{#if pull}
-						It picks it up at its next update check.{/if}
-				{:else}Revision <Code>{device.configRev}</Code>.{/if}
-			</span>
-		</div>
-		{#if blocked}<Notice tone="err">{blocked}</Notice>{/if}
-		{#if error}<Notice tone="err">{error}</Notice>{/if}
-		{#if applied}<Notice tone="ok">{applied}</Notice>{/if}
-		<div class="flex flex-wrap gap-2">
-			{#if pull}
-				<Button
-					size="sm"
-					disabled={!!blocked || dirty || applying || !device.connectedSince}
-					title={device.connectedSince
-						? 'Ask the device to fetch its settings now'
-						: 'Not connected to the app – it picks them up at its next check'}
-					onclick={apply}><RefreshCw size={15} />{applying ? 'Asking…' : 'Apply now'}</Button
+<script lang="ts">
+	import Download from '@lucide/svelte/icons/download';
+	import Undo2 from '@lucide/svelte/icons/undo-2';
+	import Upload from '@lucide/svelte/icons/upload';
+	import Usb from '@lucide/svelte/icons/usb';
+	import Wifi from '@lucide/svelte/icons/wifi';
+	import { serialSupported } from './firmware/serial.ts';
+	import { Badge, Button, Notice, relativeTime } from '#lib/ui/index.ts';
+
+	let {
+		state: boardState,
+		readAt,
+		error,
+		sent,
+		dirty,
+		busy,
+		blocked,
+		connected,
+		usbStep,
+		onread,
+		onwrite,
+		ondiscard
+	}: {
+		state: BoardState;
+		/** When the settings were read from the board. */
+		readAt?: Date;
+		error?: string;
+		/** What happened after the last write. */
+		sent?: string;
+		dirty: boolean;
+		busy: boolean;
+		/** The settings have errors: they can't be written. */
+		blocked?: string;
+		connected: boolean;
+		/** What happens over USB right now. */
+		usbStep: string;
+		onread: (via: Via) => void;
+		onwrite: (via: Via) => void;
+		ondiscard: () => void;
+	} = $props();
+
+	const usb = serialSupported();
+	const read = $derived(boardState === 'board' || boardState === 'usb');
+	/** The way they were read is the suggested way back. */
+	const from = $derived<Via>(boardState === 'usb' ? 'usb' : 'air');
+	const canWrite = $derived(dirty && !busy && !blocked);
+</script>
+
+<div class="grid gap-3">
+	<div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+		<div class="flex min-w-0 flex-1 basis-72 items-center gap-2 text-sm">
+			{#if boardState === 'unread'}<Badge>not read</Badge>
+				<span class="text-muted">Read them from the device to see and change them.</span>
+			{:else if boardState === 'loading'}<Badge tone="info">reading…</Badge>
+				<span class="text-muted">Asking the device for its settings.</span>
+			{:else if read}
+				{#if dirty}<Badge tone="warn">changed</Badge>{:else}<Badge tone="ok">as on the board</Badge
+					>{/if}
+				<span class="text-muted"
+					>Read {boardState === 'usb' ? 'over USB' : 'over the air'}
+					{readAt ? relativeTime(readAt) : ''}.{#if dirty}
+						Write them back – the device restarts with them.{/if}</span
 				>
+			{:else if boardState === 'draft'}<Badge tone="info">first flash</Badge>
+				<span class="text-muted"
+					>Not flashed yet: these go onto the board with its first USB flash (Firmware tab). A board
+					that already has settings keeps its own.</span
+				>
+			{:else if boardState === 'offline'}<Badge tone="warn">offline</Badge>
+				<span class="text-muted">The device isn’t connected to the app. Read them over USB.</span>
+			{:else}<Badge tone="err">not read</Badge>{/if}
+		</div>
+
+		<div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+			{#if (connected && boardState !== 'draft') || usb}
+				<div class="flex items-center gap-1.5" role="group" aria-label="Read from the board">
+					<span class="mr-1 flex items-center gap-1 text-xs font-medium text-muted"
+						><Download size={14} />Read</span
+					>
+					{#if connected && boardState !== 'draft'}<Button
+							size="sm"
+							disabled={busy || boardState === 'loading'}
+							onclick={() => onread('air')}><Wifi size={14} />Over the air</Button
+						>{/if}
+					{#if usb}<Button
+							size="sm"
+							disabled={busy}
+							title="Connect the board to this computer"
+							onclick={() => onread('usb')}><Usb size={14} />USB</Button
+						>{/if}
+				</div>
 			{/if}
-			<a
-				class={button({ size: 'sm', variant: 'ghost', class: 'no-underline' })}
-				href="{resolve('/devices/[id]/config.bin', { id: device.id })}?download"
-				data-sveltekit-reload><Download size={15} />config.bin</a
-			>
+
+			{#if read}
+				<div class="flex items-center gap-1.5" role="group" aria-label="Write to the board">
+					<span class="mr-1 flex items-center gap-1 text-xs font-medium text-muted"
+						><Upload size={14} />Write</span
+					>
+					{#if connected}<Button
+							size="sm"
+							variant={from === 'air' ? 'primary' : 'secondary'}
+							disabled={!canWrite}
+							onclick={() => onwrite('air')}><Wifi size={14} />Over the air</Button
+						>{/if}
+					{#if usb}<Button
+							size="sm"
+							variant={from === 'usb' || !connected ? 'primary' : 'secondary'}
+							disabled={!canWrite}
+							title="Connect the board to this computer"
+							onclick={() => onwrite('usb')}><Usb size={14} />USB</Button
+						>{/if}
+					<Button size="sm" variant="ghost" disabled={!dirty || busy} onclick={ondiscard}
+						><Undo2 size={14} />Discard</Button
+					>
+				</div>
+			{/if}
 		</div>
 	</div>
-</Card>
+	{#if error}<Notice tone="err">{error}</Notice>{/if}
+	{#if blocked && dirty}<Notice tone="err">{blocked}</Notice>{/if}
+	{#if usbStep}<Notice tone="info">{usbStep}</Notice>{/if}
+	{#if sent}<Notice tone="ok">{sent}</Notice>{/if}
+</div>

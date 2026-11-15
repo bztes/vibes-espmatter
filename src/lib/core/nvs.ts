@@ -18,7 +18,7 @@ const PAGE_FULL = 0xfffffffc;
 const VERSION2 = 0xfe;
 const CHUNK_ANY = 0xff;
 
-const TYPE = { u8: 0x01, i32: 0x14, sz: 0x21 } as const;
+const TYPE = { u8: 0x01, i8: 0x11, u16: 0x02, i16: 0x12, u32: 0x04, i32: 0x14, sz: 0x21 } as const;
 
 const CRC_TABLE = (() => {
 	const t = new Uint32Array(256);
@@ -139,4 +139,76 @@ export function nvsImage(entries: CfgEntry[], size: number): Uint8Array {
 	const image = new Uint8Array(size).fill(0xff);
 	pages.forEach((p, i) => image.set(p.buf, i * PAGE));
 	return image;
+}
+
+export interface NvsValue {
+	ns: string;
+	key: string;
+	value: string | number;
+}
+
+const INT_TYPES: Record<number, [bytes: number, signed: boolean]> = {
+	[TYPE.u8]: [1, false],
+	[TYPE.i8]: [1, true],
+	[TYPE.u16]: [2, false],
+	[TYPE.i16]: [2, true],
+	[TYPE.u32]: [4, false],
+	[TYPE.i32]: [4, true]
+};
+
+/** The strings and integers of an NVS partition image (as the device has it). Empty: none. */
+export function readNvs(image: Uint8Array): NvsValue[] {
+	const view = new DataView(image.buffer, image.byteOffset, image.byteLength);
+	const pages: { seq: number; offset: number }[] = [];
+	for (let offset = 0; offset + PAGE <= image.length; offset += PAGE) {
+		const state = view.getUint32(offset, true);
+		if (state === PAGE_ACTIVE || state === PAGE_FULL)
+			pages.push({ seq: view.getUint32(offset + 4, true), offset });
+	}
+	pages.sort((a, b) => a.seq - b.seq);
+
+	const decoder = new TextDecoder();
+	const keyOf = (at: number) => {
+		const k = image.subarray(at + 8, at + 24);
+		const end = k.indexOf(0);
+		return decoder.decode(end < 0 ? k : k.subarray(0, end));
+	};
+	const names = new Map<number, string>();
+	const raw: { ns: number; key: string; value: string | number }[] = [];
+	for (const { offset } of pages) {
+		for (let i = 0; i < ENTRIES_PER_PAGE; i++) {
+			// Only written entries (0b10), not empty or erased ones.
+			if (((image[offset + 32 + (i >> 2)] >> ((i & 3) * 2)) & 3) !== 2) continue;
+			const at = offset + FIRST_ENTRY + i * ENTRY;
+			const [ns, type, span] = image.subarray(at, at + 3);
+			if (!span) continue;
+			if (ns === 0 && type === TYPE.u8) names.set(image[at + 24], keyOf(at));
+			else if (type === TYPE.sz) {
+				const len = view.getUint16(at + 24, true);
+				const start = at + ENTRY;
+				if (len && start + len <= offset + PAGE)
+					raw.push({
+						ns,
+						key: keyOf(at),
+						value: decoder.decode(image.subarray(start, start + len - 1))
+					});
+			} else if (INT_TYPES[type]) {
+				const [bytes, signed] = INT_TYPES[type];
+				const get = {
+					1: signed ? view.getInt8 : view.getUint8,
+					2: signed ? view.getInt16 : view.getUint16,
+					4: signed ? view.getInt32 : view.getUint32
+				}[bytes]!;
+				raw.push({ ns, key: keyOf(at), value: get.call(view, at + 24, true) });
+			}
+			i += span - 1;
+		}
+	}
+	// A later entry of the same key replaces an earlier one.
+	const out = new Map<string, NvsValue>();
+	for (const r of raw) {
+		const ns = names.get(r.ns);
+		if (ns !== undefined) out.set(`${ns}\0${r.key}`, { ns, key: r.key, value: r.value });
+	}
+	return [...out.values()];
 }

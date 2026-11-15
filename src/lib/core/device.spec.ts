@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { assemble } from './assemble';
-import { deviceEntries, effectiveConfig, normalizeDevice } from './device';
+import { boardSettings, deviceEntries, effectiveConfig, normalizeDevice } from './device';
 import { addPeripheral, createConfig, enableFeature } from './engine';
 import { generate } from './generate';
+import { nvsImage, readNvs } from './nvs';
 import { validate, validateDevice } from './validate';
 
 const identity = { id: 'dev-1', name: 'Kitchen', apiToken: 'tok', appUrl: 'http://app:5173' };
@@ -27,7 +28,7 @@ describe('per-device settings', () => {
 		expect(main.files['main/app_main.cpp']).toContain(`, ${relay.settings.gpio}, true,`);
 	});
 
-	it('all come from the device', async () => {
+	it('all come from the device', () => {
 		const fw = createConfig('device', 'Sensors');
 		const climate = addPeripheral(fw, 'climate-sensor');
 		const dev = normalizeDevice(
@@ -49,7 +50,7 @@ describe('per-device settings', () => {
 		expect(eff.peripherals[0].settings.offset).toBe(-1.5);
 		expect(fw.features.wifi).not.toHaveProperty('ssid');
 
-		const { entries, rev } = await deviceEntries(fw, dev, identity);
+		const entries = deviceEntries(fw, dev, identity);
 		const get = (ns: string, key: string) =>
 			entries.find((e) => e.ns === ns && e.key === key)?.value;
 		expect(get('f.wifi', 'ssid')).toBe('Own');
@@ -57,12 +58,11 @@ describe('per-device settings', () => {
 		expect(get(`p.${climate.uid}`, 'offset')).toBe(-1.5);
 		expect(get('espm', 'token')).toBe('tok');
 		expect(get('espm', 'app_url')).toBe('http://app:5173');
-		expect(get('espm', 'rev')).toBe(rev);
-		expect(rev).toMatch(/^[0-9a-f]{12}$/);
-		// Same input, same revision; another value, another one.
-		expect((await deviceEntries(fw, dev, identity)).rev).toBe(rev);
-		dev.updates.intervalMin = 30;
-		expect((await deviceEntries(fw, dev, identity)).rev).not.toBe(rev);
+
+		// Read back from the board: the same settings; the server's app URL stays the default.
+		const back = boardSettings(readNvs(nvsImage(entries, 0x4000)), fw, identity.appUrl);
+		expect(back.id).toBe('dev-1');
+		expect(back.settings).toEqual(dev);
 	});
 
 	it('are validated per device', () => {

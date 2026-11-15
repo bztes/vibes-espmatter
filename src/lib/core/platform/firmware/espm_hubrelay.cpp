@@ -1,7 +1,6 @@
 // espmatter studio – hub relay: devices that can't (or shouldn't) talk to the app themselves pull
 // their updates through the hub, and the app reaches them through the hub's tunnel.
 //   GET  /api/v1/relay/devices/<id>/update  → app /api/v1/devices/<id>/update (image URL rewritten)
-//   GET  /api/v1/relay/devices/<id>/config.bin → app /api/v1/devices/<id>/config.bin, streamed
 //   POST /api/v1/relay/devices/<id>/report  → app /api/v1/devices/<id>/report
 //   GET  /api/v1/relay/images/<path>        → app /api/v1/firmware/<path>, streamed
 //   *    /api/v1/relay/forward/<id>/<path>  → the device at its address, /<path>
@@ -162,7 +161,6 @@ static esp_err_t manifest(httpd_req_t *req)
     s_requests++;
     const char *path = app_path(req);
     sscanf(path, "/devices/%39[^/]", s_last_device);
-    if (strstr(path, "/config.bin")) return stream(req, path);
     esp_http_client_handle_t client = upstream(req, path, HTTP_METHOD_GET);
     if (esp_http_client_open(client, 0) != ESP_OK) return fail(req, client, "app unreachable");
     esp_http_client_fetch_headers(client);

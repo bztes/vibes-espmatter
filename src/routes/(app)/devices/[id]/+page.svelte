@@ -7,7 +7,7 @@
 	let { params }: PageProps = $props();
 
 	const device = $derived(await getDevice(params.id));
-	const tab = $derived(page.url.searchParams.get('tab') ?? 'settings');
+	const tab = $derived(page.url.searchParams.get('tab') ?? 'general');
 </script>
 
 <svelte:head><title>{device.name} – espmatter studio</title></svelte:head>

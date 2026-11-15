@@ -1,8 +1,8 @@
 /**
  * Devices of a firmware: their settings (`normalizeDevice`), the configuration a device sees
- * (`effectiveConfig`: the firmware's settings plus the device's own), and what is written to its
- * configuration partition (`deviceEntries` → `nvsImage`).
- * Isomorphic: the configurator shows the same values the server writes.
+ * (`effectiveConfig`: the firmware's settings plus the device's own), what is written to its
+ * configuration partition (`deviceEntries`) and what is read back from it (`boardSettings`).
+ * The app keeps none of them: they live on the board only.
  */
 import type { PerDeviceField, Settings, SettingValue } from '#sdk';
 import { cfgType, nvsNamespace, PLATFORM_KEYS, PLATFORM_NS, type CfgType } from './cfg';
@@ -16,6 +16,7 @@ import {
 	validPasscode
 } from './matter';
 import type { DeviceSettings, FirmwareConfig } from './model';
+import type { NvsValue } from './nvs';
 import { features, peripherals } from './registry';
 
 /** The plugin scopes of a firmware with their per-device fields. */
@@ -116,17 +117,14 @@ export interface DeviceIdentity {
 	appUrl: string;
 }
 
-/**
- * Everything in a device's configuration partition, sorted, plus `rev`: a hash of the rest.
- * The device reports `rev` back, so the app knows whether it has the current settings.
- */
-export async function deviceEntries(
+/** Everything in a device's configuration partition. */
+export function deviceEntries(
 	firmware: FirmwareConfig,
 	device: DeviceSettings,
 	identity: DeviceIdentity
-): Promise<{ entries: CfgEntry[]; rev: string }> {
+): CfgEntry[] {
 	const m = device.matter;
-	const platform: Record<Exclude<keyof typeof PLATFORM_KEYS, 'rev'>, SettingValue> = {
+	const platform: Record<keyof typeof PLATFORM_KEYS, SettingValue> = {
 		id: identity.id,
 		name: identity.name,
 		host: device.hostname,
@@ -166,11 +164,31 @@ export async function deviceEntries(
 				value: device.plugins[scope][f.key]
 			});
 	}
-	const text = JSON.stringify(entries.map((e) => [e.ns, e.key, e.type, e.value]));
-	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-	const rev = [...new Uint8Array(digest).slice(0, 6)]
-		.map((b) => b.toString(16).padStart(2, '0'))
-		.join('');
-	entries.push({ ns: PLATFORM_NS, key: 'rev', type: 'str', value: rev });
-	return { entries, rev };
+	return entries;
+}
+
+/**
+ * The settings in a board's configuration partition, and whose they are (`id`). Its app URL is
+ * empty when it is the server's own (`identity.appUrl`). Missing values get defaults.
+ */
+export function boardSettings(
+	values: NvsValue[],
+	firmware: FirmwareConfig,
+	defaultAppUrl: string
+): { id: string; settings: DeviceSettings } {
+	const ns = (name: string) =>
+		Object.fromEntries(values.filter((v) => v.ns === name).map((v) => [v.key, v.value]));
+	const p = ns(PLATFORM_NS);
+	const appUrl = String(p.app_url ?? '');
+	const raw = {
+		matter: { discriminator: p.disc, passcode: p.passcode },
+		updates: { pull: p.pull === undefined ? undefined : !!Number(p.pull), intervalMin: p.interval },
+		hostname: p.host,
+		appUrl: appUrl.replace(/\/$/, '') === defaultAppUrl.replace(/\/$/, '') ? '' : appUrl,
+		uiPasswordHash: p.ui_hash,
+		plugins: Object.fromEntries(
+			perDeviceScopes(firmware).map(({ scope }) => [scope, ns(nvsNamespace(scope))])
+		)
+	};
+	return { id: String(p.id ?? ''), settings: normalizeDevice(raw, firmware) };
 }

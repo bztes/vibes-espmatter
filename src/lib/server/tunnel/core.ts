@@ -44,6 +44,8 @@ interface Pending {
 interface Conn {
 	ws: WebSocket;
 	since: Date;
+	/** Where the device reached the app (`https://espmatter.app`): its app URL. */
+	origin: string;
 	nextId: number;
 	pending: Map<number, Pending>;
 	alive: boolean;
@@ -91,6 +93,21 @@ export function tunnelConnected(deviceId: string): Date | undefined {
 	return state.conns.get(deviceId)?.since;
 }
 
+/** The origin a connected device reached the app at. */
+export function tunnelOrigin(deviceId: string): string | undefined {
+	return state.conns.get(deviceId)?.origin;
+}
+
+const first = (h: string | string[] | undefined) =>
+	(Array.isArray(h) ? h[0] : h)?.split(',')[0].trim();
+
+function originOf(req: IncomingMessage): string {
+	const encrypted = 'encrypted' in req.socket && !!req.socket.encrypted;
+	const proto = first(req.headers['x-forwarded-proto']) ?? (encrypted ? 'https' : 'http');
+	const host = first(req.headers['x-forwarded-host']) ?? req.headers.host ?? '';
+	return `${proto}://${host}`;
+}
+
 const reject = (socket: Duplex, status: number, text: string) => {
 	socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 };
@@ -117,7 +134,8 @@ export function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer
 	auth(deviceId, token).then(
 		(ok) => {
 			if (!ok) return reject(socket, 401, 'Unauthorized');
-			state.wss.handleUpgrade(req, socket, head, (ws) => attach(deviceId, ws));
+			const origin = originOf(req);
+			state.wss.handleUpgrade(req, socket, head, (ws) => attach(deviceId, ws, origin));
 		},
 		() => reject(socket, 500, 'Internal Server Error')
 	);
@@ -135,10 +153,10 @@ function emit(deviceId: string, connected: boolean) {
 	}
 }
 
-function attach(deviceId: string, ws: WebSocket) {
+function attach(deviceId: string, ws: WebSocket, origin: string) {
 	// A device that reconnects (e.g. after a restart) replaces its old, possibly half-open socket.
 	state.conns.get(deviceId)?.ws.terminate();
-	const conn: Conn = { ws, since: new Date(), nextId: 1, pending: new Map(), alive: true };
+	const conn: Conn = { ws, since: new Date(), origin, nextId: 1, pending: new Map(), alive: true };
 	state.conns.set(deviceId, conn);
 	emit(deviceId, true);
 	ensurePinger();
@@ -298,6 +316,11 @@ export function deviceConnection(dev: Reachable): { via: 'tunnel' | 'hub'; since
 	if (own) return { via: 'tunnel', since: own };
 	const hub = dev.hubId ? tunnelConnected(dev.hubId) : undefined;
 	return hub ? { via: 'hub', since: hub } : null;
+}
+
+/** The origin the device reaches the app at (its own tunnel's, else its hub's), while connected. */
+export function deviceOrigin(dev: Reachable): string | undefined {
+	return tunnelOrigin(dev.id) ?? (dev.hubId ? tunnelOrigin(dev.hubId) : undefined);
 }
 
 /** Send a request to a device: through its own tunnel, else through its hub's relay. */

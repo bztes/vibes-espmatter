@@ -16,6 +16,9 @@ export const deviceSettings = v.looseObject({
 	plugins: v.optional(v.record(v.string(), v.looseObject({})))
 });
 
+/** A device admin password (the board's own login). */
+export const devicePassword = v.pipe(v.string(), v.minLength(8), v.maxLength(64));
+
 export const deviceName = v.pipe(
 	v.string(),
 	v.trim(),

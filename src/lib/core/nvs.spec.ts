@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { CfgEntry } from './device';
-import { crc32, nvsImage } from './nvs';
+import { crc32, nvsImage, readNvs } from './nvs';
 
 const entries: CfgEntry[] = [
 	{ ns: 'espm', key: 'id', type: 'str', value: '6f1c2a3b-1111-2222-3333-444455556666' },
@@ -23,6 +23,17 @@ describe('nvs image', () => {
 		// Reference: the same entries as CSV, `nvs_partition_gen.py generate in.csv out.bin 0x4000`.
 		const hash = createHash('sha256').update(nvsImage(entries, 0x4000)).digest('hex');
 		expect(hash).toBe('3799682a82d5fcad4e3333e5fd228bb3a41ef9716ee123b2b5dfc8def55480b1');
+	});
+
+	it('reads back what it writes', () => {
+		const read = readNvs(nvsImage(entries, 0x4000));
+		expect(read).toHaveLength(entries.length);
+		for (const e of entries) {
+			const want =
+				e.type === 'bool' ? (e.value ? 1 : 0) : e.type === 'num' ? String(e.value) : e.value;
+			expect(read.find((r) => r.ns === e.ns && r.key === e.key)?.value).toBe(want);
+		}
+		expect(readNvs(new Uint8Array(0x4000).fill(0xff))).toEqual([]);
 	});
 
 	it('computes zlib CRC32', () => {

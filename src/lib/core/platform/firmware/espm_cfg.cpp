@@ -78,10 +78,9 @@ void espm_cfg_init(void)
     }
     nvs_release_iterator(it);
     if (s_values->empty())
-        ESP_LOGW(TAG, "The device configuration is empty – flash the device from the app (or write its config.bin)");
+        ESP_LOGW(TAG, "The device configuration is empty – flash the device from the app");
     else
-        ESP_LOGI(TAG, "Device configuration %s: %u values", espm_cfg_str("espm", "rev", "?"),
-                 (unsigned)s_values->size());
+        ESP_LOGI(TAG, "Device configuration: %u values", (unsigned)s_values->size());
 }
 
 bool espm_cfg_loaded(void)
@@ -145,24 +144,142 @@ const char *espm_hostname(void)
     return host;
 }
 
-size_t espm_cfg_size(void)
+// ---------------------------------------------------------------------------------------------
+// The app reads and replaces the configuration (GET/PUT /api/v1/config), with the API token only.
+// ---------------------------------------------------------------------------------------------
+#include "espm.h"
+
+#if ESPM_HTTP
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+static bool app_caller(httpd_req_t *req)
 {
-    const esp_partition_t *p = partition();
-    return p ? p->size : 0;
+    if (espm_caller_user() == -1) return true;
+    espm_send_error(req, 403, "only the app reads and writes the configuration");
+    return false;
 }
 
-esp_err_t espm_cfg_write(const uint8_t *image, size_t len)
+/** `{"values": [{"ns", "key", "value"}]}`: what the device runs (loaded at boot). */
+static esp_err_t get_config(httpd_req_t *req)
 {
-    const esp_partition_t *p = partition();
-    if (!p) return ESP_ERR_NOT_FOUND;
-    if (len != p->size) return ESP_ERR_INVALID_SIZE;
-    // First page: active or full (0xfffffffe / 0xfffffffc), as the app writes it.
-    uint32_t state;
-    memcpy(&state, image, sizeof(state));
-    if (state != 0xfffffffe && state != 0xfffffffc) return ESP_ERR_INVALID_ARG;
-    nvs_flash_deinit_partition(PARTITION);
-    esp_err_t err = esp_partition_erase_range(p, 0, p->size);
-    if (err == ESP_OK) err = esp_partition_write(p, 0, image, len);
-    ESP_LOGI(TAG, "New device configuration written: %s", esp_err_to_name(err));
+    if (!app_caller(req)) return ESP_OK;
+    espm_cfg_init();
+    cJSON *json = cJSON_CreateObject();
+    cJSON *list = cJSON_AddArrayToObject(json, "values");
+    for (const auto &v : *s_values) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "ns", v.ns.c_str());
+        cJSON_AddStringToObject(item, "key", v.key.c_str());
+        if (v.is_text) cJSON_AddStringToObject(item, "value", v.text.c_str());
+        else cJSON_AddNumberToObject(item, "value", (double)v.number);
+        cJSON_AddItemToArray(list, item);
+    }
+    return espm_send_json(req, json);
+}
+
+/** One NVS handle per run of a namespace, committed when the namespace changes. */
+struct Writer {
+    std::string ns;
+    nvs_handle_t h = 0;
+    bool open = false;
+
+    esp_err_t close()
+    {
+        if (!open) return ESP_OK;
+        esp_err_t err = nvs_commit(h);
+        nvs_close(h);
+        open = false;
+        return err;
+    }
+
+    esp_err_t handle(const char *name)
+    {
+        if (open && ns == name) return ESP_OK;
+        esp_err_t err = close();
+        if (err == ESP_OK) err = nvs_open_from_partition(PARTITION, name, NVS_READWRITE, &h);
+        if (err == ESP_OK) open = true, ns = name;
+        return err;
+    }
+};
+
+static esp_err_t set_value(Writer &w, cJSON *item)
+{
+    cJSON *ns = cJSON_GetObjectItem(item, "ns");
+    cJSON *key = cJSON_GetObjectItem(item, "key");
+    cJSON *type = cJSON_GetObjectItem(item, "type");
+    cJSON *value = cJSON_GetObjectItem(item, "value");
+    if (!cJSON_IsString(ns) || !cJSON_IsString(key) || !cJSON_IsString(type) || !value)
+        return ESP_ERR_INVALID_ARG;
+    esp_err_t err = w.handle(ns->valuestring);
+    if (err != ESP_OK) return err;
+    nvs_handle_t h = w.h;
+    const char *t = type->valuestring;
+    if (!strcmp(t, "bool")) err = nvs_set_u8(h, key->valuestring, cJSON_IsTrue(value) ? 1 : 0);
+    else if (!strcmp(t, "int")) err = nvs_set_i32(h, key->valuestring, (int32_t)cJSON_GetNumberValue(value));
+    else if (cJSON_IsString(value)) err = nvs_set_str(h, key->valuestring, value->valuestring);
+    else if (cJSON_IsNumber(value)) {
+        // Numbers are stored as text, as the app writes them.
+        char text[32];
+        snprintf(text, sizeof(text), "%.10g", value->valuedouble);
+        err = nvs_set_str(h, key->valuestring, text);
+    } else err = ESP_ERR_INVALID_ARG;
     return err;
 }
+
+static void restart_task(void *)
+{
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+}
+
+/**
+ * Replace the whole configuration with `{"values": [{"ns", "key", "type", "value"}]}` (types as
+ * in cfg.ts), then restart: values are read at boot.
+ */
+static esp_err_t put_config(httpd_req_t *req)
+{
+    if (!app_caller(req)) return ESP_OK;
+    cJSON *body = espm_read_json(req, 12 * 1024);
+    if (!body) return ESP_FAIL;
+    cJSON *list = cJSON_GetObjectItem(body, "values");
+    if (!cJSON_IsArray(list) || !cJSON_GetArraySize(list)) {
+        cJSON_Delete(body);
+        return espm_send_error(req, 400, "values required");
+    }
+    const esp_partition_t *p = partition();
+    esp_err_t err = p ? ESP_OK : ESP_ERR_NOT_FOUND;
+    if (err == ESP_OK) {
+        nvs_flash_deinit_partition(PARTITION);
+        err = esp_partition_erase_range(p, 0, p->size);
+    }
+    if (err == ESP_OK) err = nvs_flash_init_partition(PARTITION);
+    Writer w;
+    cJSON *item;
+    cJSON_ArrayForEach(item, list)
+    {
+        if (err != ESP_OK) break;
+        err = set_value(w, item);
+    }
+    esp_err_t closed = w.close();
+    if (err == ESP_OK) err = closed;
+    cJSON_Delete(body);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Writing the configuration failed: %s", esp_err_to_name(err));
+        return espm_send_error(req, 500, esp_err_to_name(err));
+    }
+    ESP_LOGI(TAG, "New device configuration written – restarting");
+    espm_send_ok(req);
+    xTaskCreate(restart_task, "restart", 2048, nullptr, 5, nullptr);
+    return ESP_OK;
+}
+
+struct CfgRoutes {
+    CfgRoutes()
+    {
+        espm_route(HTTP_GET, "/api/v1/config", get_config);
+        espm_route(HTTP_PUT, "/api/v1/config", put_config);
+    }
+};
+static CfgRoutes s_routes;
+#endif

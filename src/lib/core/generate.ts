@@ -405,8 +405,8 @@ ${
 		? `
 Device settings (identity, network, per-device values) are not compiled in: they live in the
 \`${CFG_PARTITION}\` partition at ${hex(cfg.offset)}. Without it the firmware starts with empty
-defaults – flash a device from the app, or download its \`config.bin\` there and write it with
-\`esptool.py write_flash ${hex(cfg.offset)} config.bin\`.
+defaults – flash a device from the app, which writes its settings there and later changes them on
+the device itself.
 `
 		: ''
 }
