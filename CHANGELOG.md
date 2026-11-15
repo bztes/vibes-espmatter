@@ -1,5 +1,27 @@
 # vibes-espmatter
 
+## 0.4.0
+
+### Minor Changes
+
+- [`1a96229`](https://github.com/bztes/vibes-espmatter/commit/1a96229cced35b03ccc613ff1ba18da1cfbb6916) Thanks [@bztes](https://github.com/bztes)! - The app link of hubs and devices is part of every firmware, set in one place and shown as a diagram.
+
+- [`77d9865`](https://github.com/bztes/vibes-espmatter/commit/77d98658e6ecd13f72de873e275a2707a0ee1236) Thanks [@bztes](https://github.com/bztes)! - Firmware settings list the boards last, only those that run the chosen features and peripherals.
+
+- [`208d20b`](https://github.com/bztes/vibes-espmatter/commit/208d20b630f1c75776dac16e18a2a7e4a0d7570a) Thanks [@bztes](https://github.com/bztes)! - The settings stored on the board have their own Device settings tab; the rest is under General.
+
+- [`f9aab9c`](https://github.com/bztes/vibes-espmatter/commit/f9aab9ca9ed58e1e09bcee96d78848f3f18a9a9a) Thanks [@bztes](https://github.com/bztes)! - Firmware settings and device settings are separate: per-device values are set only on each device.
+
+- [`d167bf7`](https://github.com/bztes/vibes-espmatter/commit/d167bf7ada32e5eb365874ca5b55b8cb2591ec8f) Thanks [@bztes](https://github.com/bztes)! - Firmware and devices share one page: each firmware lists its devices.
+
+- [`f85699f`](https://github.com/bztes/vibes-espmatter/commit/f85699f9bcb85c2c3a69ad6b93160b993a6240d9) Thanks [@bztes](https://github.com/bztes)! - The app reaches Thread devices through their hub, e.g. to start an update check right away.
+
+- [`208d20b`](https://github.com/bztes/vibes-espmatter/commit/208d20b630f1c75776dac16e18a2a7e4a0d7570a) Thanks [@bztes](https://github.com/bztes)! - Device settings live on the board only and are read and written there, over the air or over USB in any mix.
+
+### Patch Changes
+
+- [`208d20b`](https://github.com/bztes/vibes-espmatter/commit/208d20b630f1c75776dac16e18a2a7e4a0d7570a) Thanks [@bztes](https://github.com/bztes)! - Device subdomains use the public URL and are entered as a subdomain.
+
 ## 0.3.0
 
 ### Minor Changes
