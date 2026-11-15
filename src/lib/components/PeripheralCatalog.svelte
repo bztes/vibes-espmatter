@@ -3,7 +3,7 @@
 	import { addPeripheral, type Resolved } from '#lib/core/engine.ts';
 	import type { FirmwareConfig } from '#lib/core/model.ts';
 	import { peripherals } from '#lib/core/registry.ts';
-	import { requirementIssues } from '#lib/core/validate.ts';
+	import { noBoardFor } from '#lib/core/validate.ts';
 	import { Badge, Code, Dialog, PluginIcon } from '#lib/ui/index.ts';
 	import { deviceTypeNames } from '#sdk/matter';
 
@@ -32,12 +32,8 @@
 	);
 	const taken = (id: string) =>
 		!peripherals.get(id).multiple && config.peripherals.some((s) => s.peripheral === id);
-	const blocked = (id: string) =>
-		requirementIssues(
-			resolved.slot().board,
-			peripherals.get(id).requires,
-			peripherals.get(id).name
-		)[0];
+	/** No board runs it with the rest. */
+	const blocked = (id: string) => noBoardFor(resolved, peripherals.get(id));
 
 	function add(id: string) {
 		addPeripheral(config, id);

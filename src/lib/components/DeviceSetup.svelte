@@ -1,4 +1,4 @@
-<!-- The Settings tab of a firmware: name, boards, connectivity, app link, features and peripherals, with live checks. -->
+<!-- The Settings tab of a firmware: name, connectivity, app link, peripherals, features and – fitting them – boards, with live checks. -->
 <script lang="ts">
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -15,7 +15,7 @@
 	} from '#lib/core/engine.ts';
 	import { KINDS } from '#lib/core/kinds.ts';
 	import type { FirmwareConfig } from '#lib/core/model.ts';
-	import { capName, requirementIssues } from '#lib/core/validate.ts';
+	import { capName, fittingBoards, noBoardFor, slotRequirements } from '#lib/core/validate.ts';
 	import { Badge, Button, Card, Field, Input, PluginIcon, Toggle } from '#lib/ui/index.ts';
 	import BoardPicker from './BoardPicker.svelte';
 	import IssueList from './IssueList.svelte';
@@ -33,15 +33,14 @@
 	const all = $derived(featuresFor(config.kind));
 	const transports = $derived(all.filter((f) => f.group === 'transport'));
 	const others = $derived(all.filter((f) => f.group !== 'transport'));
-	const main = $derived(resolved.slot('main'));
 	let catalog = $state(false);
 
 	const scoped = (scope: string) => issues.filter((i) => i.scope === scope && !i.field);
 	const count = (scope: string, severity: Issue['severity']) =>
 		issues.filter((i) => i.scope === scope && i.severity === severity).length;
 
-	/** Why a feature can't run on the main board (hardware only – missing capabilities show as issues). */
-	const hardwareBlock = (f: FeatureDef) => requirementIssues(main.board, f.requires, f.name)[0];
+	/** Why a feature can't be enabled: no board runs it with the rest. */
+	const hardwareBlock = (f: FeatureDef) => noBoardFor(resolved, f);
 
 	function toggle(f: FeatureDef, on: boolean) {
 		if (on) enableFeature(config, f.id);
@@ -59,63 +58,6 @@
 		<Field label="Name" id="fw-name" help="Of the firmware. Devices have names of their own.">
 			<Input id="fw-name" maxlength={48} bind:value={config.name} />
 		</Field>
-	</Card>
-
-	<!-- Boards ---------------------------------------------------------------------------- -->
-	<Card
-		title="Boards"
-		description={resolved.slots.length > 1
-			? 'This device consists of several boards – each gets its own firmware.'
-			: 'The ESP32 board the firmware runs on.'}
-	>
-		<div class="grid gap-5">
-			{#each resolved.slots as slot (slot.id)}
-				<div id="board:{slot.id}" class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-					<div class="grid content-start gap-1.5">
-						<label for="board-{slot.id}" class="text-sm font-medium">{slot.name}</label>
-						<BoardPicker
-							id="board-{slot.id}"
-							value={slot.board.id}
-							requires={slot.id === 'main' ? kind.mainSlot.requires : slot.def?.requires}
-							onchange={(id) => setBoard(config, slot.id, id)}
-						/>
-						{#if slot.def?.description}<p class="m-0 text-xs text-muted">
-								{slot.def.description}
-							</p>{/if}
-					</div>
-					<div class="rounded-lg bg-surface-2/70 p-3 text-xs">
-						<div class="flex flex-wrap items-center gap-1.5">
-							<Badge tone="accent">{slot.chip.name}</Badge>
-							{#each caps(slot.chip.id) as c (c)}<Badge>{capName(c).replace(/^an? /, '')}</Badge
-								>{/each}
-							<Badge>{slot.board.flashMB} MB flash</Badge>
-							{#if slot.board.psram !== 'none'}<Badge>{slot.board.psram} PSRAM</Badge>{/if}
-							{#if slot.framework === 'esp-idf'}<Badge tone="info">ESP-IDF</Badge>{:else}<Badge
-									tone="info">esp-matter</Badge
-								>{/if}
-						</div>
-						{#if slot.board.description}<p class="mt-2 mb-0 text-muted">
-								{slot.board.description}
-							</p>{/if}
-						{#if slot.board.url}
-							<!-- eslint-disable svelte/no-navigation-without-resolve -- external datasheet link -->
-							<a
-								class="mt-1 inline-flex items-center gap-1"
-								href={slot.board.url}
-								target="_blank"
-								rel="noreferrer">Datasheet <ExternalLink size={12} /></a
-							>
-							<!-- eslint-enable svelte/no-navigation-without-resolve -->
-						{/if}
-					</div>
-					{#if scoped(`board:${slot.id}`).length}
-						<div class="sm:col-span-2">
-							<IssueList issues={scoped(`board:${slot.id}`)} compact />
-						</div>
-					{/if}
-				</div>
-			{/each}
-		</div>
 	</Card>
 
 	<!-- Connectivity ----------------------------------------------------------------------- -->
@@ -152,9 +94,7 @@
 					>
 					<span class="grid gap-0.5">
 						<span class="text-sm font-semibold">{f.name}</span>
-						<span class="text-xs text-muted"
-							>{block ? block.replace(/^[^:]*: t/, 'T') : f.description}</span
-						>
+						<span class="text-xs text-muted">{block ?? f.description}</span>
 					</span>
 				</button>
 			{/each}
@@ -310,6 +250,63 @@
 							{#if scoped(scope).length}<div class="mt-3">
 									<IssueList issues={scoped(scope)} compact />
 								</div>{/if}
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	</Card>
+
+	<!-- Boards ---------------------------------------------------------------------------- -->
+	<Card
+		title="Boards"
+		description={resolved.slots.length > 1
+			? 'This device consists of several boards – each gets its own firmware. Only boards that run the features and peripherals above are listed.'
+			: 'The ESP32 board the firmware runs on. Only boards that run the features and peripherals above are listed.'}
+	>
+		<div class="grid gap-5">
+			{#each resolved.slots as slot (slot.id)}
+				<div id="board:{slot.id}" class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+					<div class="grid content-start gap-1.5">
+						<label for="board-{slot.id}" class="text-sm font-medium">{slot.name}</label>
+						<BoardPicker
+							id="board-{slot.id}"
+							value={slot.board.id}
+							fitting={fittingBoards(slotRequirements(resolved, slot.id), slot.framework)}
+							onchange={(id) => setBoard(config, slot.id, id)}
+						/>
+						{#if slot.def?.description}<p class="m-0 text-xs text-muted">
+								{slot.def.description}
+							</p>{/if}
+					</div>
+					<div class="rounded-lg bg-surface-2/70 p-3 text-xs">
+						<div class="flex flex-wrap items-center gap-1.5">
+							<Badge tone="accent">{slot.chip.name}</Badge>
+							{#each caps(slot.chip.id) as c (c)}<Badge>{capName(c).replace(/^an? /, '')}</Badge
+								>{/each}
+							<Badge>{slot.board.flashMB} MB flash</Badge>
+							{#if slot.board.psram !== 'none'}<Badge>{slot.board.psram} PSRAM</Badge>{/if}
+							{#if slot.framework === 'esp-idf'}<Badge tone="info">ESP-IDF</Badge>{:else}<Badge
+									tone="info">esp-matter</Badge
+								>{/if}
+						</div>
+						{#if slot.board.description}<p class="mt-2 mb-0 text-muted">
+								{slot.board.description}
+							</p>{/if}
+						{#if slot.board.url}
+							<!-- eslint-disable svelte/no-navigation-without-resolve -- external datasheet link -->
+							<a
+								class="mt-1 inline-flex items-center gap-1"
+								href={slot.board.url}
+								target="_blank"
+								rel="noreferrer">Datasheet <ExternalLink size={12} /></a
+							>
+							<!-- eslint-enable svelte/no-navigation-without-resolve -->
+						{/if}
+					</div>
+					{#if scoped(`board:${slot.id}`).length}
+						<div class="sm:col-span-2">
+							<IssueList issues={scoped(`board:${slot.id}`)} compact />
 						</div>
 					{/if}
 				</div>

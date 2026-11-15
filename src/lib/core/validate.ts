@@ -8,7 +8,8 @@ import {
 	type Field,
 	type HardwareRequirements,
 	type Issue,
-	type Settings
+	type Settings,
+	type SlotDef
 } from '#sdk';
 import {
 	pinFields,
@@ -25,9 +26,51 @@ import { KINDS } from './kinds';
 import { appLink } from './link';
 import { validPasscode } from './matter';
 import { MAIN, type DeviceSettings, type FirmwareConfig } from './model';
+import { boards } from './registry';
 
 /** Minimum flash for a Matter firmware, and with two OTA slots. */
 const MATTER_MIN_FLASH_MB = 4;
+
+type Requirements = (HardwareRequirements | undefined)[];
+
+/** What a slot's board must have: the main board everything the kind, features and peripherals need. */
+export function slotRequirements(r: Resolved, slotId = MAIN, without?: string): Requirements {
+	if (slotId !== MAIN) return [r.slot(slotId).def?.requires];
+	return [
+		KINDS[r.config.kind].mainSlot.requires,
+		...r.features.filter((f) => !without || f.def.group !== without).map((f) => f.def.requires),
+		...r.peripherals.map((p) => p.def.requires)
+	];
+}
+
+export function boardFits(
+	board: BoardDef,
+	reqs: Requirements,
+	framework: ResolvedSlot['framework']
+) {
+	const chip = CHIPS[board.chip];
+	if (framework === 'esp-matter' && (chip.matterUnsupported || board.flashMB < MATTER_MIN_FLASH_MB))
+		return false;
+	return reqs.every((req) => !requirementIssues(board, req, '').length);
+}
+
+/** Boards that run a slot, in catalog order. */
+export const fittingBoards = (reqs: Requirements, framework: ResolvedSlot['framework']) =>
+	boards.all().filter((b) => boardFits(b, reqs, framework));
+
+/** Why a plugin can't be added: no board runs it together with what is enabled. */
+export function noBoardFor(
+	r: Resolved,
+	def: { name: string; group?: string; requires?: HardwareRequirements; slots?: SlotDef[] }
+): string | undefined {
+	// It replaces the enabled feature of its group.
+	const reqs = [...slotRequirements(r, MAIN, def.group), def.requires];
+	const main = fittingBoards(reqs, 'esp-matter').length;
+	const slots = (def.slots ?? []).every(
+		(s) => fittingBoards([s.requires], s.framework ?? 'esp-idf').length
+	);
+	return main && slots ? undefined : `No board runs ${def.name} together with the rest.`;
+}
 
 export function requirementIssues(
 	board: BoardDef,

@@ -4,7 +4,7 @@ import { addPeripheral, createConfig, enableFeature, normalize, resolve, setBoar
 import { generate, partitionTable } from './generate';
 import { manualPairingCode, qrPayload } from './matter';
 import { boards, features, peripherals } from './registry';
-import { hasErrors, validate } from './validate';
+import { fittingBoards, hasErrors, noBoardFor, slotRequirements, validate } from './validate';
 import { checkEndpoint } from '#sdk/matter';
 import { uiSpec } from '#lib/server/builds/device-ui.ts';
 
@@ -312,5 +312,37 @@ describe('partitions', () => {
 		expect(table).toContain('espm_cfg, data, nvs, 0x18000, 0x4000,');
 		const [main] = generate(a, () => '');
 		expect(main.configPartition).toEqual({ offset: 0x18000, size: 0x4000 });
+	});
+});
+
+describe('fitting boards', () => {
+	const fit = (config: ReturnType<typeof createConfig>, slot = 'main') => {
+		const r = resolve(config);
+		return fittingBoards(slotRequirements(r, slot), r.slot(slot).framework).map((b) => b.id);
+	};
+
+	it('lists only boards that run every feature', () => {
+		const config = createConfig('device');
+		expect(fit(config)).toContain('esp32-s3-devkitc-1');
+		enableFeature(config, 'thread');
+		expect(fit(config)).toContain('esp32-h2-supermini');
+		expect(fit(config)).not.toContain('esp32-s3-devkitc-1');
+	});
+
+	it('lists boards per slot a feature brings', () => {
+		const config = createConfig('hub');
+		enableFeature(config, 'thread-border-router');
+		expect(fit(config, 'radio')).toContain('esp32-h2-supermini');
+		expect(fit(config, 'radio')).not.toContain('esp32-s3-devkitc-1');
+	});
+
+	it('blocks a feature only when no board runs it with the rest', () => {
+		const hub = resolve(createConfig('hub'));
+		// Replaces Wi-Fi: the P4 has Ethernet and PSRAM.
+		expect(noBoardFor(hub, features.get('ethernet'))).toBeUndefined();
+		// Thread on a hub board: no Thread chip has PSRAM.
+		expect(
+			noBoardFor(hub, { name: 'x', requires: { capabilities: ['ieee802154'] } })
+		).toBeDefined();
 	});
 });
