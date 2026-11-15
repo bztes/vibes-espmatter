@@ -1,4 +1,4 @@
-// espmatter studio – firmware updates: pulled from the app (or a hub's relay), rollback guard.
+// espmatter studio – firmware updates: pulled from the app or through a hub's relay, rollback guard.
 // The device asks every ESPM_UPDATE_INTERVAL_MIN minutes, or at once when the app calls
 // POST /api/v1/ota/check. The device configuration comes the same way: the manifest names the
 // current revision and the device fetches `config.bin`. Compiled in when the network allows it;
@@ -41,10 +41,15 @@ static void restart_later(void *)
 static inline void restart_soon() { xTaskCreate(restart_later, "restart", 2048, nullptr, 5, nullptr); }
 
 static char s_bearer[80];
-/** Where manifests and reports go: the app, or (Thread devices) the relay of a hub. */
-static char s_base[160];
+/** The app itself (`<app URL>/api/v1`), and a hub's relay once found (`http://<hub>/api/v1/relay`). */
+static char s_app[160], s_hub[160];
 
-#if ESPM_UPDATE_VIA_HUB
+/** Manifests, images and configuration: from the app or through the hub. */
+static const char *pull_base() { return ESPM_UPDATE_VIA_HUB ? s_hub : s_app; }
+/** Reports go through the hub whenever the device uses one: that's how the hub learns its address. */
+static const char *report_base() { return ESPM_VIA_HUB && s_hub[0] ? s_hub : s_app; }
+
+#if ESPM_VIA_HUB && ESPM_HUB_OVER_THREAD
 #include <esp_openthread.h>
 #include <esp_openthread_lock.h>
 #include <openthread/dns_client.h>
@@ -61,24 +66,45 @@ static void on_resolved(otError err, const otDnsServiceResponse *resp, void *)
     if (err == OT_ERROR_NONE && otDnsServiceResponseGetServiceInfo(resp, &info) == OT_ERROR_NONE) {
         char addr[OT_IP6_ADDRESS_STRING_SIZE];
         otIp6AddressToString(&info.mHostAddress, addr, sizeof(addr));
-        snprintf(s_base, sizeof(s_base), "http://[%s]:%u/api/v1/relay", addr, info.mPort);
+        snprintf(s_hub, sizeof(s_hub), "http://[%s]:%u/api/v1/relay", addr, info.mPort);
     }
     xSemaphoreGive(s_found);
 }
 
-/** Find a hub's update relay with DNS-SD (the border router proxies the hub's mDNS service). */
-static bool discover_relay()
+/** Find a hub's relay with DNS-SD (the border router proxies the hub's mDNS service). */
+static bool discover_hub()
 {
     if (!s_found) s_found = xSemaphoreCreateBinary();
-    s_base[0] = 0;
+    s_hub[0] = 0;
     esp_openthread_lock_acquire(portMAX_DELAY);
     otError err = otDnsClientResolveService(esp_openthread_get_instance(), "espm-relay",
                                             "_espm-relay._tcp.default.service.arpa.", on_resolved, nullptr, nullptr);
     esp_openthread_lock_release();
     if (err != OT_ERROR_NONE) return false;
     xSemaphoreTake(s_found, pdMS_TO_TICKS(15000));
-    if (s_base[0]) ESP_LOGI(TAG, "Update relay at %s", s_base);
-    return s_base[0] != 0;
+    if (s_hub[0]) ESP_LOGI(TAG, "Hub relay at %s", s_hub);
+    return s_hub[0] != 0;
+}
+#elif ESPM_VIA_HUB
+#include <mdns.h>
+
+/** Find a hub's relay on the LAN (mDNS). */
+static bool discover_hub()
+{
+    s_hub[0] = 0;
+    mdns_init(); // already done by Matter's DNS-SD: then a no-op
+    mdns_result_t *results = nullptr;
+    if (mdns_query_ptr("_espm-relay", "_tcp", 3000, 4, &results) != ESP_OK) return false;
+    for (mdns_result_t *r = results; r && !s_hub[0]; r = r->next)
+        for (mdns_ip_addr_t *a = r->addr; a; a = a->next)
+            if (a->addr.type == ESP_IPADDR_TYPE_V4) {
+                snprintf(s_hub, sizeof(s_hub), "http://" IPSTR ":%u/api/v1/relay", IP2STR(&a->addr.u_addr.ip4),
+                         r->port);
+                break;
+            }
+    mdns_query_results_free(results);
+    if (s_hub[0]) ESP_LOGI(TAG, "Hub relay at %s", s_hub);
+    return s_hub[0] != 0;
 }
 #endif
 
@@ -93,13 +119,13 @@ static esp_err_t add_auth(esp_http_client_handle_t client)
     return esp_http_client_set_header(client, "Authorization", s_bearer);
 }
 
-/** Where updates come from: the app, or a hub's relay once found. */
-static bool have_base()
+/** Where updates come from is known (a hub's relay is looked for when needed). */
+static bool have_pull_base()
 {
 #if ESPM_UPDATE_VIA_HUB
-    if (!s_base[0]) discover_relay();
+    if (!s_hub[0]) discover_hub();
 #endif
-    return s_base[0] != 0;
+    return pull_base()[0] != 0;
 }
 
 /**
@@ -109,8 +135,9 @@ static bool have_base()
 void espm_update_report(const char *slot, const char *state, int version, int running, const char *message)
 {
     char url[256], body[320];
-    if (!s_base[0]) return;
-    snprintf(url, sizeof(url), "%s/devices/%s/report", s_base, ESPM_DEVICE_ID);
+    const char *base = report_base();
+    if (!base[0]) return;
+    snprintf(url, sizeof(url), "%s/devices/%s/report", base, ESPM_DEVICE_ID);
     if (strcmp(slot, ESPM_SLOT) == 0)
         snprintf(body, sizeof(body),
                  "{\"slot\":\"%s\",\"state\":\"%s\",\"version\":%d,\"running\":%d,\"config\":\"%s\",\"message\":\"%s\"}",
@@ -139,9 +166,9 @@ static void report(const char *state, int version, const char *message)
 /** The update the app has for another slot of this device (one the main board flashes over a wire). */
 bool espm_update_manifest(const char *slot, int running, espm_update_t *out)
 {
-    if (!have_base()) return false;
+    if (!have_pull_base()) return false;
     char url[256];
-    snprintf(url, sizeof(url), "%s/devices/%s/update?slot=%s&version=%d", s_base, ESPM_DEVICE_ID, slot, running);
+    snprintf(url, sizeof(url), "%s/devices/%s/update?slot=%s&version=%d", pull_base(), ESPM_DEVICE_ID, slot, running);
     esp_http_client_config_t cfg = {};
     cfg.url = url;
     cfg.timeout_ms = 10000;
@@ -200,7 +227,7 @@ static bool fetch_manifest(int *version, char *image_url, size_t len, bool *conf
 {
     char url[256];
     *config = false;
-    snprintf(url, sizeof(url), "%s/devices/%s/update?slot=%s&version=%d&config=%s", s_base, ESPM_DEVICE_ID,
+    snprintf(url, sizeof(url), "%s/devices/%s/update?slot=%s&version=%d&config=%s", pull_base(), ESPM_DEVICE_ID,
              ESPM_SLOT, ESPM_FW_VERSION, ESPM_CFG_REV);
     esp_http_client_config_t cfg = {};
     cfg.url = url;
@@ -229,6 +256,8 @@ static bool fetch_manifest(int *version, char *image_url, size_t len, bool *conf
             }
             cJSON_Delete(json);
         }
+    } else if (ESPM_UPDATE_VIA_HUB) {
+        s_hub[0] = 0; // the hub may have a new address: look again next time
     }
     esp_http_client_cleanup(client);
     return found;
@@ -240,7 +269,7 @@ static bool pull_config()
     size_t size = espm_cfg_size();
     if (!size) return false;
     char url[256];
-    snprintf(url, sizeof(url), "%s/devices/%s/config.bin", s_base, ESPM_DEVICE_ID);
+    snprintf(url, sizeof(url), "%s/devices/%s/config.bin", pull_base(), ESPM_DEVICE_ID);
     esp_http_client_config_t cfg = {};
     cfg.url = url;
     cfg.timeout_ms = 10000;
@@ -273,9 +302,7 @@ static bool pull_config()
 static void pull_once()
 {
     s_last_check = esp_timer_get_time() / 1000000;
-#if ESPM_UPDATE_VIA_HUB
-    if (!s_base[0] && !discover_relay()) return;
-#endif
+    if (!have_pull_base()) return;
     int version = 0;
     char image[256] = {};
     bool config = false;
@@ -319,9 +346,9 @@ static void pull_task(void *)
 {
     // Wait for the network, then report what's running (the app learns version and settings).
     while (!espm_online()) vTaskDelay(pdMS_TO_TICKS(2000));
-#if ESPM_UPDATE_VIA_HUB
-    vTaskDelay(pdMS_TO_TICKS(10000)); // let SRP/DNS settle after joining the Thread network
-    discover_relay();
+#if ESPM_VIA_HUB
+    if (ESPM_HUB_OVER_THREAD) vTaskDelay(pdMS_TO_TICKS(10000)); // let SRP/DNS settle after joining
+    discover_hub();
 #endif
     report("running", ESPM_FW_VERSION, nullptr);
     // With pull updates off, the device only reports (the app learns its version and settings).
@@ -387,9 +414,7 @@ void espm_ota_init()
 #endif
 #if ESPM_UPDATE_PULL
     snprintf(s_bearer, sizeof(s_bearer), "Bearer %s", ESPM_API_TOKEN);
-#if !ESPM_UPDATE_VIA_HUB
-    snprintf(s_base, sizeof(s_base), "%s/api/v1", ESPM_APP_URL);
-#endif
-    if (ESPM_APP_URL[0] || ESPM_UPDATE_VIA_HUB) xTaskCreate(pull_task, "espm_pull", 6144, nullptr, 3, &s_pull_task);
+    if (ESPM_APP_URL[0]) snprintf(s_app, sizeof(s_app), "%s/api/v1", ESPM_APP_URL);
+    if (s_app[0] || ESPM_VIA_HUB) xTaskCreate(pull_task, "espm_pull", 6144, nullptr, 3, &s_pull_task);
 #endif
 }

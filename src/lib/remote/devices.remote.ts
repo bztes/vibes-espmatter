@@ -120,7 +120,7 @@ export const getDevice = query(uuid, async (id) => {
 		/** The board still has the token from before a rotation. */
 		tokenPending: !!dev.previousToken,
 		subdomain,
-		/** Its own hostname, through the tunnel (remote-access feature). */
+		/** Its address in the app, passed on through its tunnel or its hub's. */
 		url: await deviceUrl(subdomain, dev.settings.appUrl),
 		/** Since when the app reaches it, and how (its own tunnel, or its hub's); null: not at all. */
 		connectedSince: deviceConnection(dev)?.since ?? null,

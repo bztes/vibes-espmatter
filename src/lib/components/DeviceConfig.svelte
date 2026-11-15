@@ -1,4 +1,4 @@
-<!-- The Settings tab of a device: its name and own values – per-device fields, pairing, updates, status reports, access. -->
+<!-- The Settings tab of a device: its name and own values – per-device fields, pairing, its link to the app, updates. -->
 <script lang="ts">
 	import Eye from '@lucide/svelte/icons/eye';
 	import EyeOff from '@lucide/svelte/icons/eye-off';
@@ -15,8 +15,9 @@
 		randomPasscode,
 		validPasscode
 	} from '#lib/core/matter.ts';
+	import { appLink } from '#lib/core/link.ts';
 	import type { DeviceSettings, FirmwareConfig } from '#lib/core/model.ts';
-	import { updateRoute } from '#lib/core/platform.ts';
+	import { canPull } from '#lib/core/platform.ts';
 	import {
 		listHubs,
 		probeDevice,
@@ -40,6 +41,7 @@
 		Toggle
 	} from '#lib/ui/index.ts';
 	import IssueList from './IssueList.svelte';
+	import LinkDiagram from './LinkDiagram.svelte';
 	import SettingsFields from './SettingsFields.svelte';
 
 	let {
@@ -63,11 +65,18 @@
 		device.kind === 'device' ? await listHubs(device.location?.id ?? null) : []
 	);
 	const resolved = $derived(resolveConfig(effective));
-	const route = $derived(updateRoute(resolved));
-	/** The device keeps a tunnel to the app: reachable at its own hostname, from anywhere. */
-	const remote = $derived(resolved.has('remote-access'));
-	/** A Thread device: the app reaches it through its hub's tunnel. */
-	const viaHub = $derived(!remote && route === 'hub');
+	const link = $derived(appLink(resolved));
+	const pull = $derived(canPull(resolved));
+	const thread = $derived(device.kind === 'device' && !resolved.has('uplink'));
+	/** The app reaches it (its own tunnel or its hub's). */
+	const reachable = $derived(link.access !== 'off');
+	const appHost = $derived.by(() => {
+		try {
+			return new URL(settings.appUrl || device.publicUrl).host;
+		} catch {
+			return undefined;
+		}
+	});
 	const matter = $derived(KINDS[device.kind].matterDevice);
 	const scopes = $derived(perDeviceScopes(firmware));
 	const effectiveScopes = $derived(perDeviceScopes(effective));
@@ -331,18 +340,34 @@
 	{/if}
 
 	<section class="grid gap-3">
-		<h2 class="m-0 text-sm font-semibold text-muted">Connection to the app</h2>
-		<div class="grid gap-6 lg:grid-cols-2">
+		<h2 class="m-0 text-sm font-semibold text-muted">App link</h2>
+		<div class="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
 			<Card
-				title="App connection"
-				description="How the device reaches this app: it reports what it runs (version, settings) after each start and install, and fetches new firmware and settings when pull updates are on."
+				title="App link"
+				description="How this {device.kind === 'hub'
+					? 'hub'
+					: 'device'} talks to the app – chosen in its firmware, the addresses here."
 			>
-				<div class="grid gap-4">
-					{#if route === 'direct'}
+				<div class="grid gap-5">
+					<LinkDiagram
+						kind={device.kind}
+						{link}
+						{thread}
+						name={name || device.name}
+						hub={device.hub?.name ?? null}
+						app={appHost}
+					/>
+
+					{#if link.direct}
 						<Field
 							label="App URL"
 							id="app-url"
-							help="Used for status reports and pull updates. Empty: the public URL under Admin → Settings."
+							help="Where it reaches the app itself ({[
+								link.updates === 'app' && 'updates',
+								link.access === 'tunnel' && 'tunnel'
+							]
+								.filter(Boolean)
+								.join(', ')}). Empty: the public URL under Admin → Settings."
 						>
 							<Input
 								id="app-url"
@@ -351,52 +376,17 @@
 								bind:value={settings.appUrl}
 							/>
 						</Field>
-					{:else if route === 'hub'}
-						<p class="m-0 text-sm text-muted">
-							Through a hub with the update relay – reports and pulls alike. Thread devices can’t
-							reach the app themselves.
-						</p>
-					{:else}
-						<p class="m-0 text-sm text-muted">Needs an IP network.</p>
 					{/if}
-					<p class="m-0 text-xs text-muted">Last report {relativeTime(device.lastSeenAt)}</p>
-				</div>
-			</Card>
 
-			<Card
-				title="Updates"
-				description="How new firmware and settings get onto the device after the first USB flash."
-			>
-				<div class="grid gap-4">
-					<div class="flex items-start gap-3">
-						<Toggle label="Updates from the app" bind:checked={settings.updates.pull} />
-						<div class="text-sm">
-							<div class="font-medium">The device checks for updates</div>
-							<div class="text-xs text-muted">
-								{#if !settings.updates.pull}Off – it only reports what it runs; updates over USB
-									only.{:else if route === 'direct'}Directly from this app, at its App URL.{:else if route === 'hub'}Through
-									a hub with the update relay – Thread devices can’t reach the app themselves.{:else}Needs
-									an IP network.{/if}
-							</div>
-						</div>
-					</div>
-					{#if settings.updates.pull}
-						<Field label="Check every" id="interval" help="Minutes (5–1440)">
-							<Input
-								id="interval"
-								type="number"
-								min="5"
-								max="1440"
-								class="max-w-32"
-								bind:value={settings.updates.intervalMin}
-							/>
-						</Field>
-					{/if}
-					{#if device.kind === 'device' && route === 'hub'}
+					{#if link.viaHub}
 						<Field
 							label="Hub"
 							id="hub"
-							help="Thread device: its updates come through this hub, and the app reaches it through the hub."
+							help="Its {link.updates === 'hub' && link.access === 'hub'
+								? 'updates and access go'
+								: link.updates === 'hub'
+									? 'updates go'
+									: 'access goes'} through this hub (its relay must be on)."
 						>
 							<Select
 								id="hub"
@@ -411,80 +401,94 @@
 							</Select>
 						</Field>
 						{#if !hubs.length}<Notice tone="warn"
-								>Create a hub{device.location ? ` in ${device.location.name}` : ''} with the Thread border
-								router and update relay features.</Notice
-							>{/if}
+								>Create a hub{device.location ? ` in ${device.location.name}` : ''} with its relay on.</Notice
+							>{:else if !device.hub}<Notice tone="warn">Pick its hub.</Notice>{/if}
 					{/if}
-				</div>
-			</Card>
 
-			<Card
-				title="Remote access"
-				description="Its web interface and REST API at a hostname of its own, from anywhere: the device keeps a connection to this app, and the app passes requests on. Login is the device’s own."
-			>
-				<div class="grid gap-4">
-					{#if viaHub}
-						<p class="m-0 text-sm text-muted">
-							Through its hub: the hub’s connection to the app and its <strong>Update relay</strong>
-							pass requests on. The hub learns the device’s address at its first update check.
-						</p>
-						{#if !device.hub}<Notice tone="warn">Pick its hub under Updates.</Notice>{/if}
-					{:else if !remote}
-						<p class="m-0 text-sm text-muted">
-							Off – enable the <strong>Remote access</strong> feature in the firmware{device.kind ===
-							'device'
-								? ' (Wi-Fi devices)'
-								: ''}.
-						</p>
-					{/if}
-					{#if device.url}
-						<div class="flex flex-wrap items-center gap-2 text-sm">
-							{#if remote || viaHub}
-								<Badge tone={device.connectedSince ? 'ok' : 'warn'}
-									>{device.connectedSince ? 'connected' : 'offline'}</Badge
-								>
-							{/if}
-							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the device's own host, not an app route -->
-							<a class="font-mono break-all" href={device.url} target="_blank" rel="noreferrer"
-								>{device.url}</a
-							>
-							<CopyButton text={device.url} label="Copy address" />
-						</div>
-						{#if new URL(device.url).hostname.endsWith('.localhost')}
-							<p class="m-0 text-xs text-muted">
-								Only on this computer: the app URL is empty or an IP address. Use a domain name to
-								reach the device from elsewhere.
-							</p>
-						{/if}
-					{/if}
-					<div class="grid gap-2">
-						<label for="subdomain" class="text-sm font-medium">Hostname</label>
-						<div class="flex gap-2">
-							<Input id="subdomain" mono maxlength={63} bind:value={subdomain} />
-							{#if remote || viaHub}
+					{#if reachable}
+						<div class="grid gap-2">
+							<label for="subdomain" class="text-sm font-medium">Address in the app</label>
+							<div class="flex gap-2">
+								<Input id="subdomain" mono maxlength={63} bind:value={subdomain} />
 								<Button
 									variant="ghost"
 									disabled={!device.connectedSince}
 									onclick={() => run(async () => (probe = await probeDevice(device.id)))}
 									>Test</Button
 								>
+							</div>
+							{#if subdomainError}<p class="m-0 text-xs text-err">{subdomainError}</p>{/if}
+							{#if device.url}
+								<div class="flex flex-wrap items-center gap-2 text-sm">
+									<Badge tone={device.connectedSince ? 'ok' : 'warn'}
+										>{device.connectedSince
+											? device.connectedVia === 'hub'
+												? 'through its hub'
+												: 'connected'
+											: 'offline'}</Badge
+									>
+									{#if probe}<Badge tone={probe.online ? 'ok' : 'err'}
+											>{probe.online ? 'answers' : 'no answer'}</Badge
+										>{/if}
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the device's own host, not an app route -->
+									<a class="font-mono break-all" href={device.url} target="_blank" rel="noreferrer"
+										>{device.url}</a
+									>
+									<CopyButton text={device.url} label="Copy address" />
+								</div>
+								{#if new URL(device.url).hostname.endsWith('.localhost')}
+									<p class="m-0 text-xs text-muted">
+										Only on this computer: the app URL is empty or an IP address. Use a domain name
+										to reach it from elsewhere.
+									</p>
+								{/if}
 							{/if}
-						</div>
-						{#if subdomainError}<p class="m-0 text-xs text-err">{subdomainError}</p>{/if}
-						<p class="m-0 flex flex-wrap items-center gap-2 text-xs text-muted">
-							{#if probe}<Badge tone={probe.online ? 'ok' : 'err'}
-									>{probe.online ? 'answers' : 'no answer'}</Badge
-								>{/if}
-							<span
-								>{#if device.connectedSince}{device.connectedVia === 'hub'
-										? 'Its hub connected'
-										: 'Connected'}
+							<p class="m-0 text-xs text-muted">
+								Its web interface and REST API, from anywhere; login is its own.{#if device.connectedSince}
+									{device.connectedVia === 'hub' ? 'Its hub connected' : 'Connected'}
 									{relativeTime(device.connectedSince)}.{/if}
-								With the connection the app also asks the device to check for updates right away after
-								you install a build or save settings.</span
-							>
+							</p>
+						</div>
+					{:else}
+						<p class="m-0 text-sm text-muted">
+							The app can’t reach this hub: its tunnel is off in the firmware.
 						</p>
+					{/if}
+					<p class="m-0 text-xs text-muted">Last report {relativeTime(device.lastSeenAt)}</p>
+				</div>
+			</Card>
+
+			<Card
+				title="Updates"
+				description="New firmware and settings after the first USB flash, pulled by the device."
+			>
+				<div class="grid gap-4">
+					<div class="flex items-start gap-3">
+						<Toggle label="Updates" bind:checked={settings.updates.pull} disabled={!pull} />
+						<div class="text-sm">
+							<div class="font-medium">The device checks for updates</div>
+							<div class="text-xs text-muted">
+								{#if !pull}Needs an IP network – USB only.{:else if !settings.updates.pull}Off – it
+									only reports what it runs; updates over USB only.{:else}{link.updates === 'hub'
+										? 'Through its hub.'
+										: 'From the app, at its app URL.'}{#if reachable}
+										The app also asks it to check right away after you install a build or save
+										settings.{/if}{/if}
+							</div>
+						</div>
 					</div>
+					{#if pull && settings.updates.pull}
+						<Field label="Check every" id="interval" help="Minutes (5–1440)">
+							<Input
+								id="interval"
+								type="number"
+								min="5"
+								max="1440"
+								class="max-w-32"
+								bind:value={settings.updates.intervalMin}
+							/>
+						</Field>
+					{/if}
 				</div>
 			</Card>
 		</div>

@@ -1,5 +1,5 @@
 /**
- * Device tunnels: each device with the remote-access feature keeps a WebSocket open to the app
+ * Device tunnels: each device whose firmware opens a tunnel keeps a WebSocket open to the app
  * (`/api/v1/devices/<id>/tunnel`, its API token as Bearer), and the app sends HTTP requests for the
  * device down that socket. The device answers them from its own HTTP server, so its routes, its
  * login and its UI work exactly as on the LAN.
@@ -14,7 +14,7 @@
  * - device → app, text: `{"t":"res","id":7,"s":200,"h":{…}}`, then binary frames (4-byte id +
  *   a chunk of the body), then `{"t":"end","id":7}` – or `{"t":"err","id":7,"e":"…"}` at any point.
  *
- * Devices without a tunnel of their own (Thread) are reached through their hub's: its update relay
+ * Devices without a tunnel of their own are reached through their hub's: its relay
  * passes `/api/v1/relay/forward/<id>/<path>` on to the device (`deviceFetch`).
  */
 import type { IncomingMessage } from 'node:http';
@@ -300,7 +300,7 @@ export function deviceConnection(dev: Reachable): { via: 'tunnel' | 'hub'; since
 	return hub ? { via: 'hub', since: hub } : null;
 }
 
-/** Send a request to a device: through its own tunnel, else through its hub's update relay. */
+/** Send a request to a device: through its own tunnel, else through its hub's relay. */
 export async function deviceFetch(dev: Reachable, req: TunnelRequest): Promise<Response> {
 	const via = deviceConnection(dev);
 	if (via?.via !== 'hub') return tunnelFetch(dev.id, req);
@@ -308,10 +308,10 @@ export async function deviceFetch(dev: Reachable, req: TunnelRequest): Promise<R
 		...req,
 		path: `/api/v1/relay/forward/${dev.id}${req.path}`
 	});
-	// The hub learns a device's address from its update checks through the relay.
+	// The hub learns a device's address from its reports and update checks through the relay.
 	if (res.status === 421)
 		throw new TunnelError(
-			'The hub doesn’t know where the device is yet – it learns that at the device’s next update check.',
+			'The hub doesn’t know where the device is yet – it learns that at the device’s next report or update check.',
 			503
 		);
 	return res;

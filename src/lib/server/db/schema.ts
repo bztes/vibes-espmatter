@@ -126,11 +126,11 @@ export const device = sqliteTable(
 		apiToken: text('api_token').notNull(),
 		/** After rotating: the token the board still has, until it runs the new configuration. */
 		previousToken: text('previous_token'),
-		/** Hub that relays updates (Thread devices). */
+		/** Hub the device reaches the app through (updates, access). */
 		hubId: text('hub_id').references((): AnySQLiteColumn => device.id, { onDelete: 'set null' }),
 		/**
 		 * Its own hostname below the device domain (`matterhub` → matterhub.espmatter.app), where the
-		 * app passes requests on to it through its tunnel (remote-access feature). Unique across all users.
+		 * app passes requests on to it through its tunnel or its hub's. Unique across all users.
 		 */
 		subdomain: text('subdomain'),
 		lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }),

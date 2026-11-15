@@ -35,7 +35,7 @@ export const KINDS: Record<DeviceKind, KindDef> = {
 		name: 'Matter hub',
 		defaultName: 'ESPMatter Hub',
 		description:
-			'Controls your Matter devices, runs the Thread network and relays updates to Thread devices.',
+			'Controls your Matter devices, runs the Thread network and links other devices to the app.',
 		// The Matter controller alone needs ~130 KB of RAM (put in PSRAM, see espm_psram.lf in generate.ts).
 		mainSlot: { name: 'Main board', requires: { psram: true } },
 		defaultBoard: 'esp32-s3-devkitc-1',

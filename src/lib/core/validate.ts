@@ -22,6 +22,7 @@ import {
 } from './engine';
 import { effectiveConfig, HOSTNAME, isPerDevice } from './device';
 import { KINDS } from './kinds';
+import { appLink } from './link';
 import { validPasscode } from './matter';
 import { MAIN, type DeviceSettings, type FirmwareConfig } from './model';
 
@@ -160,6 +161,15 @@ export function validate(
 			peripheralCount: r.peripherals.length
 		})
 	);
+
+	// App link ------------------------------------------------------------------------------
+	const link = appLink(r);
+	if (link.relay && link.access === 'off')
+		push(
+			'info',
+			'link',
+			'Without a tunnel the app can’t reach devices through this hub – they still get their updates through it.'
+		);
 
 	// Plugins ------------------------------------------------------------------------------
 	const groups = new Map<string, string[]>();

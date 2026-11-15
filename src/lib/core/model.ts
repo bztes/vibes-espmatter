@@ -5,6 +5,7 @@
  * `normalizeDevice()` make any input (old versions, untrusted requests) safe to work with.
  */
 import type { DeviceKind, Settings } from '#sdk';
+import type { AppLink } from './link';
 
 export interface PeripheralInstance {
 	/** Stable id of the instance (`[a-z0-9]{6}`), part of REST paths and C identifiers. */
@@ -31,10 +32,12 @@ export interface FirmwareConfig {
 	features: Record<string, Settings>;
 	peripherals: PeripheralInstance[];
 	matter: MatterProduct;
+	/** How it talks to the app (core, compiled in as chosen). */
+	link: AppLink;
 }
 
 export interface UpdatePolicy {
-	/** The device asks for updates by itself (Wi-Fi: from the app, Thread: through its hub). */
+	/** The device asks for updates by itself (from the app or through its hub, see `AppLink`). */
 	pull: boolean;
 	/** Minutes between checks (the app can also ask for one right away). */
 	intervalMin: number;
@@ -48,7 +51,7 @@ export interface DeviceSettings {
 	updates: UpdatePolicy;
 	/** Hostname on the network (Wi-Fi, Ethernet, mDNS); empty: from the device name. */
 	hostname: string;
-	/** Where the device reaches this app (pulls, reports); empty: the server's public URL. */
+	/** Where the device reaches this app itself (updates, tunnel); empty: the server's public URL. */
 	appUrl: string;
 	/**
 	 * Admin password of the device web interface as `pbkdf2-sha256$<iterations>$<salt>$<hash>`

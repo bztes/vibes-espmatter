@@ -1,4 +1,4 @@
-// espmatter studio – remote access: a WebSocket from the device to the app
+// espmatter studio – tunnel: a WebSocket from the device to the app
 // (`<app>/api/v1/devices/<id>/tunnel`, the device's API token as Bearer). The app sends HTTP
 // requests for `<subdomain>.<device domain>` down it; they are answered by the device's own HTTP
 // server over loopback, so routes, login and web interface work exactly as on the LAN.
@@ -10,7 +10,7 @@
 //                 binary 4-byte id + a chunk of the body        (any number)
 //                 text   {"t":"end","id":7}   or   {"t":"err","id":7,"e":"…"}
 #include "espm.h"
-#include "espm_remote.h"
+#include "espm_tunnel.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +24,7 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
-static const char *TAG = "espm_remote";
+static const char *TAG = "espm_tunnel";
 static constexpr size_t MAX_BODY = 16 * 1024; // as the app's MAX_BODY
 static constexpr size_t MAX_TEXT = 2048;      // a request's head: method, path, a few headers
 static constexpr size_t CHUNK = 2048;         // response body per binary frame
@@ -50,7 +50,7 @@ static uint8_t s_rx_op;
 // A request head whose body (the next binary frame) hasn't arrived yet.
 static Job s_waiting;
 
-// Status, for GET /api/v1/remote.
+// Status, for GET /api/v1/tunnel.
 static bool s_connected;
 static time_t s_since;
 static unsigned s_requests, s_failures, s_connects;
@@ -313,7 +313,6 @@ static void on_ws_event(void *, esp_event_base_t, int32_t event_id, void *event_
 static esp_err_t status(httpd_req_t *req)
 {
     cJSON *json = cJSON_CreateObject();
-    cJSON_AddBoolToObject(json, "enabled", s_ws != nullptr);
     cJSON_AddBoolToObject(json, "connected", s_connected);
     cJSON_AddNumberToObject(json, "since", s_connected ? (double)s_since : 0);
     cJSON_AddNumberToObject(json, "connects", s_connects);
@@ -323,23 +322,19 @@ static esp_err_t status(httpd_req_t *req)
     return espm_send_json(req, json);
 }
 
-void espm_remote_init()
+void espm_tunnel_init()
 {
-    espm_route(HTTP_GET, "/api/v1/remote", status);
+    espm_route(HTTP_GET, "/api/v1/tunnel", status);
 }
 
-void espm_remote_start()
+void espm_tunnel_start()
 {
     if (s_ws) return;
-    if (!ESPM_REMOTE_ON) {
-        set_error("off for this device");
-        return;
-    }
     const char *app = ESPM_APP_URL;
     bool tls = strncmp(app, "https://", 8) == 0;
     if (!app[0] || (!tls && strncmp(app, "http://", 7) != 0)) {
         set_error("no app URL");
-        ESP_LOGW(TAG, "no app URL – remote access off");
+        ESP_LOGW(TAG, "no app URL – no tunnel");
         return;
     }
     // http(s)://host[:port][/base] → ws(s)://host[:port][/base]/api/v1/devices/<id>/tunnel
@@ -351,7 +346,7 @@ void espm_remote_start()
     if (!s_uri || !s_auth_header) return;
 
     s_jobs = xQueueCreate(QUEUE_LEN, sizeof(Job));
-    xTaskCreate(worker, "espm_remote", 6144, nullptr, 4, nullptr);
+    xTaskCreate(worker, "espm_tunnel", 6144, nullptr, 4, nullptr);
 
     esp_websocket_client_config_t cfg = {};
     cfg.uri = s_uri;

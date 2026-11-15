@@ -70,7 +70,7 @@
 					disabled={!!blocked || dirty || applying || !device.connectedSince}
 					title={device.connectedSince
 						? 'Ask the device to fetch its settings now'
-						: 'Not connected to the app (Remote access) – it picks them up at its next check'}
+						: 'Not connected to the app – it picks them up at its next check'}
 					onclick={apply}><RefreshCw size={15} />{applying ? 'Asking…' : 'Apply now'}</Button
 				>
 			{/if}

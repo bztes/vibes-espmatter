@@ -21,6 +21,7 @@ import {
 	type SlotDef
 } from '#sdk';
 import { KINDS } from './kinds';
+import { normalizeLink } from './link';
 import { cfgExpr, cfgType, nvsNamespace } from './cfg';
 import { MAIN, TEST_VENDOR_ID, type FirmwareConfig, type PeripheralInstance } from './model';
 import { boards, features, peripherals, type Registered } from './registry';
@@ -319,6 +320,15 @@ export function normalize(raw: unknown): FirmwareConfig {
 	}
 
 	const m = (input.matter ?? {}) as Partial<FirmwareConfig['matter']>;
+	// Before the link was core, the tunnel and the relay were features.
+	const link =
+		input.link ??
+		(Object.keys(rawFeatures).length
+			? {
+					access: 'remote-access' in rawFeatures ? 'tunnel' : kind === 'hub' ? 'off' : 'hub',
+					relay: 'update-relay' in rawFeatures
+				}
+			: undefined);
 	return {
 		schema: 2,
 		kind,
@@ -329,7 +339,8 @@ export function normalize(raw: unknown): FirmwareConfig {
 		matter: {
 			vendorId: int(m.vendorId, TEST_VENDOR_ID, 1, 0xfff4),
 			productId: int(m.productId, kind === 'hub' ? 0x8001 : 0x8000, 1, 0xffff)
-		}
+		},
+		link: normalizeLink(link, kind)
 	};
 }
 

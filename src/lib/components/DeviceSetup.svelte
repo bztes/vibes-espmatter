@@ -1,4 +1,4 @@
-<!-- The Settings tab of a firmware: name, boards, connectivity, features and peripherals, with live checks. -->
+<!-- The Settings tab of a firmware: name, boards, connectivity, app link, features and peripherals, with live checks. -->
 <script lang="ts">
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -18,6 +18,7 @@
 	import { Badge, Button, Card, Field, Input, PluginIcon, Toggle } from '#lib/ui/index.ts';
 	import BoardPicker from './BoardPicker.svelte';
 	import IssueList from './IssueList.svelte';
+	import LinkSettings from './LinkSettings.svelte';
 	import SettingsFields from './SettingsFields.svelte';
 	import PeripheralCatalog from './PeripheralCatalog.svelte';
 
@@ -175,6 +176,8 @@
 				</div>{/if}
 		{/each}
 	</Card>
+
+	<LinkSettings {config} {resolved} {issues} />
 
 	<!-- Peripherals ----------------------------------------------------------------------------- -->
 	{#if kind.peripherals}

@@ -1,13 +1,14 @@
-// espmatter studio – update relay: Thread devices pull their updates from the app through the hub.
+// espmatter studio – hub relay: devices that can't (or shouldn't) talk to the app themselves pull
+// their updates through the hub, and the app reaches them through the hub's tunnel.
 //   GET  /api/v1/relay/devices/<id>/update  → app /api/v1/devices/<id>/update (image URL rewritten)
 //   GET  /api/v1/relay/devices/<id>/config.bin → app /api/v1/devices/<id>/config.bin, streamed
 //   POST /api/v1/relay/devices/<id>/report  → app /api/v1/devices/<id>/report
 //   GET  /api/v1/relay/images/<path>        → app /api/v1/firmware/<path>, streamed
-//   *    /api/v1/relay/forward/<id>/<path>  → the Thread device at http://[<its address>]/<path>
+//   *    /api/v1/relay/forward/<id>/<path>  → the device at its address, /<path>
 // The caller's Authorization header is forwarded unchanged: the app decides, the hub only relays.
 // A device's address is learned from its relayed requests the app accepted (so only with its token).
 #include "espm.h"
-#include "espm_relay.h"
+#include "espm_hubrelay.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +21,7 @@
 #include <mdns.h>
 #include <nvs.h>
 
-static const char *TAG = "espm_relay";
+static const char *TAG = "espm_hubrelay";
 static unsigned s_requests, s_transfers;
 static unsigned long long s_bytes;
 static char s_last_device[40], s_last_error[64];
@@ -29,7 +30,7 @@ static char s_last_device[40], s_last_error[64];
 /** `/api/v1/relay/devices/<id>/<rest>` → `/devices/<id>/<rest>` (+ query). */
 static const char *app_path(httpd_req_t *req) { return req->uri + strlen("/api/v1/relay"); }
 
-// --- Addresses of Thread devices (kept in NVS, so a restart of the hub doesn't forget them) ---
+// --- Addresses of devices (kept in NVS, so a restart of the hub doesn't forget them) ---
 
 static constexpr int MAX_NODES = 32;
 struct Node {
@@ -40,7 +41,7 @@ struct Node {
 static Node s_nodes[MAX_NODES];
 static uint32_t s_seen;
 static bool s_nodes_loaded;
-static const char *NODES_NS = "espm_relay";
+static const char *NODES_NS = "espm_hubrelay";
 
 static void load_nodes()
 {
@@ -74,12 +75,21 @@ static void learn(httpd_req_t *req)
     socklen_t len = sizeof(peer);
     if (getpeername(httpd_req_to_sockfd(req), (sockaddr *)&peer, &len) != 0 || peer.sin6_family != AF_INET6)
         return;
-    // Not IPv4 (mapped: LAN clients, the tunnel's loopback), not link-local (needs a zone).
+    // Wi-Fi devices come as IPv4 (mapped), Thread devices as IPv6. Not the tunnel's loopback, not
+    // link-local IPv6 (needs a zone).
     const uint8_t *a = peer.sin6_addr.s6_addr;
     static const uint8_t MAPPED[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
-    if (!memcmp(a, MAPPED, sizeof(MAPPED)) || (a[0] == 0xfe && (a[1] & 0xc0) == 0x80)) return;
     char addr[48];
-    if (!inet_ntop(AF_INET6, &peer.sin6_addr, addr, sizeof(addr))) return;
+    if (!memcmp(a, MAPPED, sizeof(MAPPED))) {
+        if (a[12] == 127) return;
+        snprintf(addr, sizeof(addr), "%u.%u.%u.%u", a[12], a[13], a[14], a[15]);
+    } else {
+        static const uint8_t LOOPBACK[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+        if ((a[0] == 0xfe && (a[1] & 0xc0) == 0x80) || !memcmp(a, LOOPBACK, 16)) return;
+        char ip6[INET6_ADDRSTRLEN];
+        if (!inet_ntop(AF_INET6, &peer.sin6_addr, ip6, sizeof(ip6))) return;
+        snprintf(addr, sizeof(addr), "[%s]", ip6);
+    }
     load_nodes();
     Node *slot = nullptr;
     for (auto &n : s_nodes)
@@ -206,7 +216,7 @@ static esp_err_t report(httpd_req_t *req)
     return err == ESP_OK ? espm_send_ok(req) : espm_send_error(req, 502, "app unreachable");
 }
 
-// --- Requests of the app for a Thread device ---
+// --- Requests of the app for a device ---
 
 /** Answer headers passed back (as the tunnel does); kept until the answer is sent. */
 static const char *const PASS_BACK[] = {"Content-Type", "Content-Encoding", "Cache-Control", "Location",
@@ -234,7 +244,7 @@ static esp_err_t forward(httpd_req_t *req)
     if (!node) return espm_send_error(req, 421, "device unknown to this hub");
 
     char url[600];
-    if (snprintf(url, sizeof(url), "http://[%s]%s", node->addr, slash) >= (int)sizeof(url))
+    if (snprintf(url, sizeof(url), "http://%s%s", node->addr, slash) >= (int)sizeof(url))
         return espm_send_error(req, 414, "path too long");
     static constexpr size_t MAX_BODY = 16 * 1024; // as the tunnel's
     if (req->content_len > MAX_BODY) return espm_send_error(req, 413, "body too large");
@@ -329,10 +339,10 @@ struct RelayRoutes {
 static RelayRoutes s_routes;
 #endif
 
-void espm_relay_start()
+void espm_hubrelay_start()
 {
-    // Announced on the LAN; the border router's discovery proxy makes it visible to Thread devices.
+    // Announced on the LAN (Wi-Fi devices); a border router's discovery proxy makes it visible on Thread.
     mdns_init();
     mdns_service_add("espm-relay", "_espm-relay", "_tcp", 80, nullptr, 0);
-    ESP_LOGI(TAG, "Update relay announced");
+    ESP_LOGI(TAG, "Relay announced");
 }

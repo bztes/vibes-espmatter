@@ -1,5 +1,6 @@
 import type { Story } from '#sdk/device-ui';
 import MatterWidget from './ui/MatterWidget.svelte';
+import RelayWidget from './ui/RelayWidget.svelte';
 import SystemWidget from './ui/SystemWidget.svelte';
 import UpdatesWidget from './ui/UpdatesWidget.svelte';
 
@@ -12,6 +13,21 @@ const system = {
 };
 
 export default [
+	{
+		name: 'Hub relay',
+		page: 'settings',
+		component: RelayWidget,
+		tab: 'System',
+		api: {
+			'/api/v1/relay': {
+				requests: 128,
+				transfers: 3,
+				bytes: 4718592,
+				lastDevice: '6f1c2e4a',
+				lastError: ''
+			}
+		}
+	},
 	{
 		name: 'System',
 		page: 'settings',

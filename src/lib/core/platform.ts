@@ -1,28 +1,24 @@
 /**
  * What every device gets, whatever plugins are enabled: the REST API core (system, identify,
- * reboot), the Matter node with its onboarding data, and firmware updates: pulled from the app –
- * or, for Thread devices, through a hub's update relay. The app can ask for a check right away.
+ * reboot), the Matter node with its onboarding data, firmware updates, and its link to the app
+ * (`link.ts`): updates from the app or through a hub, a tunnel, a hub's relay – each compiled in
+ * only when chosen.
  */
 import type { ApiRoute, Contributor } from '#sdk';
 import type { BuildInfo } from './assemble';
 import { platformCfg } from './cfg';
 import type { Resolved } from './engine';
 import { KINDS } from './kinds';
+import { appLink } from './link';
 import { MAIN } from './model';
 
 export const PLATFORM_DIR = 'src/lib/core/platform';
 
-export type UpdateRoute = 'direct' | 'hub' | 'none';
-
 /**
- * How the main board can get updates on its own. Whether a device does is its own setting
- * (`updates.pull`), read at runtime.
+ * The main board can get updates over the air: it has an IP network. Whether a device does is its
+ * own setting (`updates.pull`), read at runtime.
  */
-export function updateRoute(r: Resolved): UpdateRoute {
-	if (r.has('uplink')) return 'direct';
-	if (r.has('thread')) return 'hub';
-	return 'none';
-}
+export const canPull = (r: Resolved) => r.has('ip');
 
 /** Hubs keep accounts of their own (admins, and users with grants per paired device and endpoint). */
 export const hasAccounts = (r: Resolved) => r.config.kind === 'hub';
@@ -236,15 +232,84 @@ const UPDATE_CHECK: ApiRoute = {
 	path: '/api/v1/ota/check',
 	summary: 'Check for an update now',
 	description:
-		'The device asks the app (or its hub’s relay) for new firmware and settings right away instead of at its next periodic check. Called by the app after releasing a build or saving settings. 409 when the device doesn’t take updates from the app.',
+		'The device asks for new firmware and settings right away (the app, or through its hub) instead of at its next periodic check. Called by the app after releasing a build or saving settings. 409 when the device doesn’t take updates.',
 	auth: 'token',
 	response: { ok: true }
 };
 
+const TUNNEL_STATUS: ApiRoute = {
+	method: 'GET',
+	path: '/api/v1/tunnel',
+	summary: 'Tunnel to the app',
+	description:
+		'Whether the device’s tunnel to the app is up; the app passes requests for its address on through it.',
+	auth: 'token',
+	response: {
+		connected: true,
+		since: 1793880000,
+		connects: 3,
+		requests: 120,
+		failures: 0,
+		lastError: ''
+	}
+};
+
+const RELAY_API: ApiRoute[] = [
+	{
+		method: 'GET',
+		path: '/api/v1/relay/devices/*',
+		summary: 'Update manifest for a device (proxied to the app)',
+		description:
+			'`/api/v1/relay/devices/<id>/update?slot=main&version=<n>`: what the app answers for that device, with the image URL rewritten to the relay. The device’s own token is passed on – the hub adds no authority of its own.',
+		auth: 'public',
+		response: { version: 13, url: 'http://[fd11::1]:80/api/v1/relay/images/<build>/main.bin' }
+	},
+	{
+		method: 'GET',
+		path: '/api/v1/relay/devices/*/config.bin',
+		summary: 'Configuration of a device, streamed from the app',
+		auth: 'public'
+	},
+	{
+		method: 'GET',
+		path: '/api/v1/relay/images/*',
+		summary: 'Firmware image, streamed from the app',
+		auth: 'public'
+	},
+	{
+		method: 'POST',
+		path: '/api/v1/relay/devices/*',
+		summary: 'Report of a device (forwarded to the app)',
+		auth: 'public'
+	},
+	{
+		method: 'GET',
+		path: '/api/v1/relay/forward/*',
+		summary: 'A request of the app for a device (`/api/v1/relay/forward/<id>/<path>`)',
+		description:
+			'Passed on to `<path>` of the device, also as POST, PUT and DELETE. The hub learns a device’s address from its reports and update checks through the relay (421 until then). The device’s own token is passed on – the hub adds no authority of its own.',
+		auth: 'public'
+	},
+	{
+		method: 'GET',
+		path: '/api/v1/relay',
+		summary: 'Relay statistics',
+		auth: 'token',
+		response: { requests: 42, transfers: 3, bytes: 4718592, lastDevice: '6f1c…', lastError: '' }
+	}
+];
+
+/** The mDNS component instead of Matter's minimal mDNS: announcing or finding the hub's relay. */
+const MDNS = {
+	CONFIG_USE_MINIMAL_MDNS: false,
+	CONFIG_MDNS_MULTIPLE_INSTANCE: true
+};
+
 export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 	const config = r.config;
-	const route = updateRoute(r);
 	const http = r.has('ip');
+	const pull = canPull(r);
+	const link = appLink(r);
 	const matterDevice = KINDS[config.kind].matterDevice;
 
 	for (const slot of r.slots) {
@@ -287,8 +352,11 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 				// Accounts with roles and per-device grants, managed on the hub itself (espm_users.cpp).
 				ESPM_USERS: http && hasAccounts(r),
 				// Compiled in when the network allows it; each device switches them on or off.
-				ESPM_UPDATE_PULL: route !== 'none',
-				ESPM_UPDATE_VIA_HUB: route === 'hub',
+				ESPM_UPDATE_PULL: pull,
+				ESPM_UPDATE_VIA_HUB: link.updates === 'hub',
+				// Uses a hub (updates or access): finds it on Thread or the LAN, reports through it.
+				ESPM_VIA_HUB: link.viaHub,
+				ESPM_HUB_OVER_THREAD: !r.has('uplink'),
 				ESPM_UPDATE_PULL_ON: platformCfg('pull', true),
 				ESPM_UPDATE_INTERVAL_MIN: platformCfg('interval', 60),
 				// Boards this one flashes over a wire (wiredSlots).
@@ -317,7 +385,8 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 			.init('started', 'espm_ota_init();')
 			.init('started', 'espm_metrics_init();');
 		fw.source('espm_metrics.cpp');
-		if (route === 'hub') fw.sdkconfig({ CONFIG_OPENTHREAD_DNS_CLIENT: true });
+		if (link.viaHub) fw.sdkconfig(r.has('uplink') ? MDNS : { CONFIG_OPENTHREAD_DNS_CLIENT: true });
+		if (link.viaHub && r.has('uplink')) fw.component('espressif/mdns', '^1.8.0');
 		if (http) {
 			fw.source('espm_http.cpp', 'espm_system.cpp', 'espm_users.cpp')
 				.sdkconfig({
@@ -329,6 +398,19 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 				})
 				.init('early', 'espm_http_init();')
 				.init('late', 'espm_http_start();');
+			if (link.access === 'tunnel')
+				fw.source('espm_tunnel.cpp', 'espm_tunnel.h')
+					.include('"espm_tunnel.h"')
+					.component('espressif/esp_websocket_client', '^1.4.0')
+					.sdkconfig({ CONFIG_LWIP_NETIF_LOOPBACK: true })
+					.init('started', 'espm_tunnel_init();')
+					.init('network', 'espm_tunnel_start();');
+			if (link.relay)
+				fw.source('espm_hubrelay.cpp', 'espm_hubrelay.h')
+					.include('"espm_hubrelay.h"')
+					.component('espressif/mdns', '^1.8.0')
+					.sdkconfig(MDNS)
+					.init('network', 'espm_hubrelay_start();');
 		}
 		// Two app partitions for updates.
 		fw.define({ ESPM_OTA_SLOTS: true });
@@ -337,8 +419,10 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 
 	if (r.has('ip')) out.api(...CORE_API, ...(matterDevice ? MATTER_DEVICE_API : []));
 	if (http) out.api(OTA_STATUS);
-	if (route !== 'none' && http) out.api(UPDATE_CHECK);
+	if (pull && http) out.api(UPDATE_CHECK);
 	if (http) out.api(METRICS);
+	if (http && link.access === 'tunnel') out.api(TUNNEL_STATUS);
+	if (http && link.relay) out.api(...RELAY_API);
 
 	// System and update widgets, on the settings page (when a feature provides one).
 	out.ui(
@@ -356,9 +440,17 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 			title: 'Firmware',
 			tab: 'System',
 			order: 91,
-			props: { canPull: route !== 'none' }
+			props: { canPull: pull }
 		}
 	);
+	if (link.relay)
+		out.ui({
+			page: 'settings',
+			file: 'RelayWidget.svelte',
+			title: 'Hub relay',
+			tab: 'System',
+			order: 60
+		});
 	if (matterDevice)
 		out.ui({
 			page: 'settings',
@@ -368,10 +460,6 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 			order: 5
 		});
 
-	if (route === 'hub')
-		out.note(
-			'Updates reach this Thread device through a hub with the "Update relay" feature: the device finds it on the Thread network and pulls through it.'
-		);
 	const first = r.slots.filter((s) => s.id !== MAIN && s.flashFirst);
 	if (first.length)
 		out.note(`Flash ${first.map((s) => s.name).join(', ')} first, then the main board.`);
@@ -406,14 +494,14 @@ const SLOTS_STATUS: ApiRoute = {
 
 /**
  * Slots the main board flashes (`SlotDef.flashOverWire`). Their updates are deployments like the
- * main board's: the main board asks the app (or a hub's relay) and streams the image into the
+ * main board's: the main board asks the app (or its hub) and streams the image into the
  * slot. The slot is flashed in its ROM download mode, entered when the main board pulls
  * the trigger line low. Plugins wait (`espm_slot_wait`) before using the wires.
  */
 function wiredSlots(r: Resolved, out: Contributor, http: boolean) {
 	// The main board gets their updates the way it gets its own: without a route, USB only.
 	const wired = r.slots.filter((s) => s.wired && s.chip.rom);
-	if (!wired.length || updateRoute(r) === 'none') return;
+	if (!wired.length || !canPull(r)) return;
 	out
 		.firmware(MAIN)
 		.source('espm_slotflash.h', 'espm_slotflash.cpp')

@@ -12,7 +12,7 @@
 
 {#if relay.current}
 	{@const r = relay.current}
-	<Row label="Update checks">{r.requests}</Row>
+	<Row label="Requests">{r.requests}</Row>
 	<Row label="Images relayed">{r.transfers} ({formatBytes(r.bytes)})</Row>
 	<Row label="Last device"><span class="font-mono text-xs">{r.lastDevice || '–'}</span></Row>
 	{#if r.lastError}<p class="mt-2 text-xs text-err">{r.lastError}</p>{/if}

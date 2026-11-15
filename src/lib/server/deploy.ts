@@ -3,7 +3,7 @@
  *
  * - `usb`:  the browser flashes over Web Serial (with the device's configuration) and reports.
  * - `pull`: the device asks `GET /api/v1/devices/<id>/update` periodically and downloads it.
- * - `hub`:  like pull, but a Thread device asks through a hub's update relay, which proxies to here.
+ * - `hub`:  like pull, but the device asks through its hub's relay, which proxies to here.
  *
  * Releasing a build for pull also nudges the device (`POST /api/v1/ota/check`) so it asks right
  * away; when this server can't reach it, it asks at its next periodic check anyway. A device's
@@ -15,7 +15,8 @@ import { error } from '@sveltejs/kit';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { normalize, resolve } from '#lib/core/engine.ts';
 import type { FirmwareConfig } from '#lib/core/model.ts';
-import { updateRoute } from '#lib/core/platform.ts';
+import { appLink } from '#lib/core/link.ts';
+import { canPull } from '#lib/core/platform.ts';
 import { db } from './db/index.ts';
 import {
 	build,
@@ -68,21 +69,21 @@ export const boardToken = (dev: Pick<DeviceRow, 'apiToken' | 'previousToken'>) =
 
 /**
  * How a build of a firmware reaches a slot over the air (whatever devices allow): `pull` directly
- * from this app, `hub` through a hub's relay, or undefined – USB only. A board the main board
+ * from this app, `hub` through its hub's relay, or undefined – USB only. A board the main board
  * flashes over a wire gets its updates the way the main board gets its own.
  */
 export function otaMethod(config: FirmwareConfig, slot: string): 'pull' | 'hub' | undefined {
 	const r = resolve(config);
 	if (slot !== 'main' && !r.slots.find((s) => s.id === slot)?.wired) return undefined;
-	const route = updateRoute(r);
-	return route === 'none' ? undefined : route === 'hub' ? 'hub' : 'pull';
+	if (!canPull(r)) return undefined;
+	return appLink(r).updates === 'hub' ? 'hub' : 'pull';
 }
 
 /** Why a device can't get a build over the air (undefined: it can). */
 export function blockedOta(dev: DeviceContext, method: 'pull' | 'hub'): string | undefined {
 	if (!dev.settings.updates.pull)
 		return 'Updates from the app are off for this device (Settings → Updates).';
-	if (method === 'hub' && !dev.hubId) return 'Assign the hub that relays updates under Settings.';
+	if (method === 'hub' && !dev.hubId) return 'Pick its hub under Settings → App link.';
 	return undefined;
 }
 
@@ -216,8 +217,8 @@ export async function setDeploymentState(id: string, state: DeployState, message
 export async function nudge(dev: DeviceRow): Promise<string | undefined> {
 	if (!deviceConnection(dev))
 		return dev.hubId
-			? 'neither it nor its hub is connected to the app (Remote access feature)'
-			: 'it isn’t connected to the app (Remote access feature)';
+			? 'neither it nor its hub is connected to the app'
+			: 'it isn’t connected to the app';
 	try {
 		const res = await deviceFetch(dev, {
 			method: 'POST',

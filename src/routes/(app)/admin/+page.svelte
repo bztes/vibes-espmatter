@@ -264,8 +264,9 @@
 				to check right away after a release. Empty: the address the build was started from.
 			</p>
 			<p class="mt-2 mb-0 text-xs text-muted">
-				Devices with the Remote access feature get a hostname of their own below the host of their
-				app URL – this one, unless a device has its own: <Code>&lt;name&gt;.{s.deviceDomain}</Code
+				Devices the app reaches (their own tunnel or their hub’s) get an address of their own below
+				the host of their app URL – this one, unless a device has its own: <Code
+					>&lt;name&gt;.{s.deviceDomain}</Code
 				>{#if s.deviceDomain === 'localhost'}
 					– only on this computer; use a domain (not an IP address) to reach them from elsewhere{/if}.
 				Point a wildcard DNS record (<Code>*.{s.deviceDomain}</Code>) at this app, with a wildcard
