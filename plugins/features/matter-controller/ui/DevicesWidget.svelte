@@ -1,6 +1,7 @@
 <!--
   Paired devices (admins): state, last seen, battery, what the device is – rename it, tag it (the
-  dashboard can group by tags) or remove it from the hub's fabric. New ones are paired in a dialog.
+  dashboard can group by tags), link it to other devices or remove it from the hub's fabric. New
+  ones are paired in a dialog.
 -->
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
@@ -17,6 +18,7 @@
 	} from '#sdk/device-ui';
 	import { visibleEndpoints } from './clusters';
 	import { ago, allTags, typeName, updateNode, type Node } from './matter';
+	import LinksEditor from './LinksEditor.svelte';
 	import PairDialog from './PairDialog.svelte';
 
 	const nodes = new Poll<{ nodes: Node[] }>('/api/v1/controller/nodes', 10000);
@@ -37,6 +39,7 @@
 
 	const list = $derived(nodes.current?.nodes ?? []);
 	const known = $derived(allTags(list));
+	const editing = $derived(list.find((n) => n.id === draft?.id));
 	const shown = $derived.by(() => {
 		const q = filter.trim().toLowerCase();
 		if (!q) return list;
@@ -252,6 +255,7 @@
 					</datalist>
 				</div>
 			</div>
+			{#if editing && editOpen}<LinksEditor node={editing} nodes={list} />{/if}
 			{#if status?.tone === 'err'}<Notice tone="err">{status.text}</Notice>{/if}
 		</div>
 	{/if}

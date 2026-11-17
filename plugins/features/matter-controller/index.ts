@@ -143,7 +143,7 @@ export default defineFeature({
 	contribute({ settings, cfg }, out) {
 		out
 			.firmware()
-			.source('espm_controller.cpp', 'espm_controller.h', 'espm_ble_fix.c')
+			.source('espm_controller.cpp', 'espm_controller.h', 'espm_links.cpp', 'espm_ble_fix.c')
 			// Without these, pairing over BLE fails right after connecting (see espm_ble_fix.c).
 			.link('-Wl,--wrap=ble_gattc_exchange_mtu', '-Wl,--wrap=peer_find')
 			.include('"espm_controller.h"')
@@ -355,6 +355,45 @@ export default defineFeature({
 				description: 'Also drops the grants of accounts on it.',
 				auth: 'token',
 				response: { ok: true }
+			},
+			{
+				method: 'GET',
+				path: '/api/v1/controller/links',
+				summary: 'Links of a device endpoint',
+				description: 'From its Bindings. Not read yet: poll until `state` is `idle`.',
+				auth: 'token',
+				params: [
+					{ name: 'node', type: 'number', description: 'Node id', required: true, in: 'query' },
+					{ name: 'endpoint', type: 'number', description: 'Endpoint', required: true, in: 'query' }
+				],
+				response: { state: 'idle', links: [{ cluster: 1026, node: 5, endpoint: 1 }] }
+			},
+			{
+				method: 'PUT',
+				path: '/api/v1/controller/links',
+				summary: 'Link a device to others for one of its client clusters',
+				description:
+					'Writes the device’s Bindings and gives it access on each target. Poll the GET until `state` is `idle`.',
+				auth: 'token',
+				params: [
+					{ name: 'node', type: 'number', description: 'Node id', required: true, in: 'body' },
+					{ name: 'endpoint', type: 'number', description: 'Endpoint', required: true, in: 'body' },
+					{
+						name: 'cluster',
+						type: 'number',
+						description: 'One of the endpoint’s `clientClusters`',
+						required: true,
+						in: 'body'
+					},
+					{
+						name: 'targets',
+						type: 'object',
+						description: 'Up to 8 `{node, endpoint}` serving the cluster; `[]` unlinks',
+						required: true,
+						in: 'body'
+					}
+				],
+				response: { state: 'busy' }
 			}
 		);
 		out.ui(

@@ -17,6 +17,8 @@ export interface Endpoint {
 	deviceTypes: number[];
 	/** What it can do: its server clusters. Missing from hubs with older firmware. */
 	clusters?: number[];
+	/** Clusters it uses as a client: what it can be linked to others for. */
+	clientClusters?: number[];
 	on?: boolean | null;
 	/** 1–254. */
 	level?: number | null;

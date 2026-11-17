@@ -11,6 +11,8 @@ enum espm_button_t : uint8_t { ESPM_BUTTON_PRESS = 1, ESPM_BUTTON_DOUBLE = 2, ES
 uint32_t espm_controller_switch_features(uint64_t node, uint16_t endpoint);
 /** The node is paired and has this endpoint. */
 bool espm_controller_has_endpoint(uint64_t node, uint16_t endpoint);
+/** The endpoint serves the cluster (`client`: uses it, i.e. can be linked to servers of it). */
+bool espm_controller_serves(uint64_t node, uint16_t endpoint, uint32_t cluster, bool client = false);
 /** A followed attribute by its API key (`on`, `level`, `colorTemperature` …) while the node is online. */
 bool espm_controller_value(uint64_t node, uint16_t endpoint, const char *key, float *out);
 
@@ -22,4 +24,6 @@ __attribute__((weak)) void espm_automations_button(uint64_t node, uint16_t endpo
 __attribute__((weak)) void espm_automations_value(uint64_t node, uint16_t endpoint, const char *key, float value);
 /** A node left the fabric: drop what refers to it. Stack lock held. */
 __attribute__((weak)) void espm_automations_node_removed(uint64_t node);
+/** A node left the fabric: forget its links (espm_links.cpp). Stack lock held. */
+void espm_links_node_removed(uint64_t node);
 void espm_automations_start();

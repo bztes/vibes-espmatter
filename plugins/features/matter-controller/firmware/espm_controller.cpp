@@ -84,6 +84,7 @@ static constexpr int MAX_SUB_PATHS = 9;
 static constexpr int MAX_ENDPOINTS = 16;
 static constexpr int MAX_CONNECTING = 3;
 static constexpr int MAX_CLUSTERS = 16;
+static constexpr int MAX_CLIENTS = 8;
 
 /** Diagnostics of a node (root endpoint), read every DIAG_INTERVAL_S rather than subscribed. */
 struct Diag {
@@ -106,6 +107,8 @@ struct Ep {
     uint32_t types[4];
     uint8_t nclusters;
     uint32_t clusters[MAX_CLUSTERS]; // server clusters (Descriptor ServerList)
+    uint8_t nclients;
+    uint32_t clients[MAX_CLIENTS]; // client clusters (ClientList): what links can point elsewhere
     uint32_t has;   // ATTRS whose cluster the endpoint serves
     uint32_t valid; // ATTRS with a reported value
     uint32_t null;  // … that is null
@@ -400,6 +403,13 @@ static void store(Node &n, const ConcreteDataAttributePath &path, chip::TLV::TLV
                 for (int i = 0; i < N_ATTRS; i++)
                     if (ATTRS[i].cluster == it.GetValue()) e->has |= 1u << i;
             }
+        } else if (path.mAttributeId == Descriptor::Attributes::ClientList::Id) {
+            Descriptor::Attributes::ClientList::TypeInfo::DecodableType list;
+            if (chip::app::DataModel::Decode(*data, list) != CHIP_NO_ERROR) return;
+            e->nclients = 0;
+            auto it = list.begin();
+            while (it.Next())
+                if (e->nclients < MAX_CLIENTS) e->clients[e->nclients++] = it.GetValue();
         }
         return;
     }
@@ -570,6 +580,15 @@ static const Ep *lookup(uint64_t node, uint16_t endpoint)
 
 bool espm_controller_has_endpoint(uint64_t node, uint16_t endpoint) { return lookup(node, endpoint); }
 
+bool espm_controller_serves(uint64_t node, uint16_t endpoint, uint32_t cluster, bool client)
+{
+    const Ep *e = lookup(node, endpoint);
+    if (!e) return false;
+    const uint32_t *list = client ? e->clients : e->clusters;
+    const uint32_t *end = list + (client ? e->nclients : e->nclusters);
+    return std::find(list, end, cluster) != end;
+}
+
 bool espm_controller_value(uint64_t node, uint16_t endpoint, const char *key, float *out)
 {
     Node *n = find(node);
@@ -665,10 +684,11 @@ static void discover(Node &n)
     n.power = false;
     ScopedMemoryBufferWithSize<AttributePathParams> paths;
     ScopedMemoryBufferWithSize<EventPathParams> events;
-    paths.Alloc(5);
+    paths.Alloc(6);
     if (!paths.Get()) return set_offline(n);
     paths[0] = AttributePathParams(chip::kInvalidEndpointId, Descriptor::Id, Descriptor::Attributes::DeviceTypeList::Id);
     paths[1] = AttributePathParams(chip::kInvalidEndpointId, Descriptor::Id, Descriptor::Attributes::ServerList::Id);
+    paths[5] = AttributePathParams(chip::kInvalidEndpointId, Descriptor::Id, Descriptor::Attributes::ClientList::Id);
     // What the device is, for the device list.
     paths[2] = AttributePathParams(0, BasicInformation::Id, BasicInformation::Attributes::VendorName::Id);
     paths[3] = AttributePathParams(0, BasicInformation::Id, BasicInformation::Attributes::ProductName::Id);
@@ -952,6 +972,10 @@ static esp_err_t list(httpd_req_t *req)
             cJSON *clusters = cJSON_AddArrayToObject(eo, "clusters");
             for (int i = 0; i < e.nclusters; i++)
                 cJSON_AddItemToArray(clusters, cJSON_CreateNumber(e.clusters[i]));
+            if (e.nclients) {
+                cJSON *clients = cJSON_AddArrayToObject(eo, "clientClusters");
+                for (int i = 0; i < e.nclients; i++) cJSON_AddItemToArray(clients, cJSON_CreateNumber(e.clients[i]));
+            }
             for (int i = 0; i < N_ATTRS; i++) {
                 if (!(e.valid & (1u << i))) continue;
                 if (e.null & (1u << i)) cJSON_AddNullToObject(eo, ATTRS[i].key);
@@ -1125,6 +1149,7 @@ static esp_err_t remove(httpd_req_t *req)
         last_event_forget(id);
 #endif
         if (espm_automations_node_removed) espm_automations_node_removed(id);
+        espm_links_node_removed(id);
     });
     char res[24];
     snprintf(res, sizeof(res), "n%llu", (unsigned long long)id);
