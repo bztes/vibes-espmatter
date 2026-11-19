@@ -1,5 +1,25 @@
 # vibes-espmatter
 
+## 0.5.0
+
+### Minor Changes
+
+- [`dedaa7d`](https://github.com/bztes/vibes-espmatter/commit/dedaa7d19e9f463ccfe5d927d7838fcd2f1c59fe) Thanks [@bztes](https://github.com/bztes)! - The hub exports paired devices’ battery to OpenTelemetry and history.
+
+- [`090e45f`](https://github.com/bztes/vibes-espmatter/commit/090e45f018ed44c4b079cce53f2b7c48a5749774) Thanks [@bztes](https://github.com/bztes)! - Firmware builds can be deleted.
+
+- [`2192204`](https://github.com/bztes/vibes-espmatter/commit/21922043475d0ad8a3b02a9c105f02baacb16366) Thanks [@bztes](https://github.com/bztes)! - Link devices to each other from the hub, so they talk directly.
+
+- [`c13437c`](https://github.com/bztes/vibes-espmatter/commit/c13437c38fc0561c92f97900f8bd62c49a03d46a) Thanks [@bztes](https://github.com/bztes)! - The history chart takes presets like today, steps back and forth, custom ranges and zooming by dragging.
+
+- [`d544351`](https://github.com/bztes/vibes-espmatter/commit/d5443513b009f95a5d0bcf21bc4d3d3ec75fa455) Thanks [@bztes](https://github.com/bztes)! - History shows fitting stats and charts for counters and states, and counters are exported as OpenTelemetry sums.
+
+- [`c13437c`](https://github.com/bztes/vibes-espmatter/commit/c13437c38fc0561c92f97900f8bd62c49a03d46a) Thanks [@bztes](https://github.com/bztes)! - Widgets can show a popover next to an element, placed on the side with room.
+
+### Patch Changes
+
+- [`45f43cf`](https://github.com/bztes/vibes-espmatter/commit/45f43cfbe94e980d4c68a2cc9e7793499a922042) Thanks [@bztes](https://github.com/bztes)! - Publish the docker image for arm64 too and build it like the other vibes projects
+
 ## 0.4.0
 
 ### Minor Changes
