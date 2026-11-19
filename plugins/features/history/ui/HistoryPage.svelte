@@ -38,7 +38,7 @@
 			bind:value={() => device?.id, (v) => (chosen.value = v ?? '')}
 			{groups}
 			aria-label="Device"
-			class="w-full sm:w-60"
+			class="w-full sm:w-0 sm:max-w-60 sm:flex-1"
 		/>
 	{/snippet}
 </HistoryView>

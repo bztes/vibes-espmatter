@@ -1,8 +1,9 @@
 <!-- History of a device: value picker, now/min/avg/max and the chart. -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { Notice, Segmented, Select, Spinner, Stat, Stored, api, errorText } from '#sdk/device-ui';
+	import { Notice, Select, Spinner, Stat, Stored, api, errorText } from '#sdk/device-ui';
 	import Chart from './Chart.svelte';
+	import RangePicker from './RangePicker.svelte';
 	import { catalog, loadCatalog } from './catalog.svelte';
 	import {
 		format,
@@ -13,6 +14,7 @@
 		type Point,
 		type Series
 	} from './sources';
+	import { isPreset, presetView, type View } from './ranges';
 
 	let {
 		device: id,
@@ -24,13 +26,6 @@
 		picker?: Snippet;
 	} = $props();
 
-	const RANGES = [
-		{ value: '1d', label: '24 h', seconds: 86400 },
-		{ value: '7d', label: '7 days', seconds: 7 * 86400 },
-		{ value: '30d', label: '30 days', seconds: 30 * 86400 },
-		{ value: '1y', label: '1 year', seconds: 365 * 86400 }
-	];
-
 	$effect(() => {
 		void loadCatalog();
 		const timer = setInterval(() => void loadCatalog(), 60000);
@@ -38,7 +33,13 @@
 	});
 
 	let chosen = $state('');
-	const range = new Stored('espm.history.range', '1d', (v) => RANGES.some((r) => r.value === v));
+	// Presets are remembered; a stepped, zoomed or custom range only for this visit.
+	const preset = new Stored('espm.history.range', 'today', isPreset);
+	let view = $state<View>(presetView(preset.value));
+	function setView(v: View) {
+		if (v.preset) preset.value = v.preset;
+		view = v;
+	}
 
 	const device = $derived(catalog.current?.devices.find((d) => d.id === id));
 	// A value that no longer exists falls back to the first one (not a diagnostic).
@@ -88,8 +89,8 @@
 	$effect(() => {
 		const source = catalog.current?.source;
 		if (!source || !wanted) return;
-		const to = Math.floor(Date.now() / 1000);
-		const from = to - RANGES.find((r) => r.value === range.value)!.seconds;
+		// A preset reaches up to now again on every load.
+		const { from, to } = view.preset ? presetView(view.preset) : view;
 		const mine = ++request;
 		loading = true;
 		api(`/api/v1/history?${wanted}&from=${from}&to=${to}`)
@@ -130,16 +131,16 @@
 {:else if !device}
 	<Notice>No values to show yet.</Notice>
 {:else}
-	<div class="mb-4 flex flex-wrap items-center gap-2">
+	<div class="mb-4 flex flex-wrap items-center gap-2 sm:flex-nowrap">
 		{@render picker?.()}
 		<Select
 			bind:value={() => series && seriesKey(series), (v) => (chosen = v ?? '')}
 			groups={seriesGroups}
 			aria-label="Value"
-			class="w-full sm:w-60"
+			class="w-full sm:w-0 sm:max-w-60 sm:flex-1"
 		/>
-		<div class="sm:ml-auto">
-			<Segmented bind:value={range.value} options={RANGES} label="Time range" />
+		<div class="w-full sm:ml-auto sm:w-auto sm:shrink-0">
+			<RangePicker {view} onchange={setView} />
 		</div>
 	</div>
 
@@ -163,7 +164,13 @@
 		</Notice>
 	{:else if series}
 		<div class={['transition-opacity', loading && 'opacity-50']}>
-			<Chart {points} unit={series.unit} from={shown.from} to={shown.to} />
+			<Chart
+				{points}
+				unit={series.unit}
+				from={shown.from}
+				to={shown.to}
+				onzoom={(from, to) => setView({ from, to })}
+			/>
 		</div>
 	{/if}
 {/if}

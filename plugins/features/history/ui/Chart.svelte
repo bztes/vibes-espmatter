@@ -1,9 +1,22 @@
-<!-- Line of the averages over a min/max band, gaps left open; hover shows a bucket. -->
+<!-- Line of the averages over a min/max band, gaps left open; hover shows a bucket, dragging zooms. -->
 <script lang="ts">
+	import { MIN_RANGE_S, timeTicks } from './ranges';
 	import { axis, format, segments, type Point } from './sources';
 
-	let { points, unit, from, to }: { points: Point[]; unit: string; from: number; to: number } =
-		$props();
+	let {
+		points,
+		unit,
+		from,
+		to,
+		onzoom
+	}: {
+		points: Point[];
+		unit: string;
+		from: number;
+		to: number;
+		/** A range dragged out with the mouse. */
+		onzoom?: (from: number, to: number) => void;
+	} = $props();
 
 	const H = 240;
 	const PAD = { top: 12, right: 12, bottom: 24, left: 52 };
@@ -34,32 +47,61 @@
 		`${path(run, 'max')}${path(run.toReversed(), 'min').replace('M', 'L')}Z`;
 
 	const yTicks = $derived(axis(range.lo, range.hi, unit, 4));
-	const xTicks = $derived.by(() => {
-		const n = Math.max(2, Math.min(6, Math.floor(width / 110)));
-		return Array.from({ length: n + 1 }, (_, i) => from + ((to - from) * i) / n).slice(1, -1);
-	});
+	const xTicks = $derived(timeTicks(from, to, Math.max(2, Math.min(8, Math.floor(width / 90)))));
 	const timeFormat = $derived(
 		new Intl.DateTimeFormat(
 			undefined,
-			to - from <= 2 * 86400
+			xTicks.step < 86400
 				? { hour: '2-digit', minute: '2-digit' }
-				: to - from <= 90 * 86400
+				: xTicks.step < 28 * 86400
 					? { day: 'numeric', month: 'short' }
 					: { month: 'short', year: '2-digit' }
 		)
 	);
+	// Midnight ticks of an hourly axis show the date instead.
+	const dayFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
+	const tickLabel = (t: number) => {
+		const d = new Date(t * 1000);
+		const midnight = xTicks.step < 86400 && !d.getHours() && !d.getMinutes() && to - from > 3600;
+		return (midnight ? dayFormat : timeFormat).format(d);
+	};
 	const hoverFormat = new Intl.DateTimeFormat(undefined, {
 		dateStyle: 'medium',
 		timeStyle: 'short'
 	});
 
 	let hover = $state<Point>();
-	function move(e: PointerEvent) {
+	// Mouse drag: times where it started and where it is now.
+	let drag = $state<{ a: number; b: number }>();
+
+	function timeAt(e: PointerEvent) {
 		const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
 		const t = from + ((e.clientX - rect.left - PAD.left) / plotW) * (to - from);
+		return Math.min(to, Math.max(from, t));
+	}
+	function move(e: PointerEvent) {
+		const t = timeAt(e);
+		if (drag) drag.b = t;
 		let best: Point | undefined;
 		for (const p of points) if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
 		hover = best;
+	}
+	function down(e: PointerEvent) {
+		if (!onzoom || e.pointerType !== 'mouse' || e.button !== 0) return;
+		(e.currentTarget as SVGElement).setPointerCapture(e.pointerId);
+		const t = timeAt(e);
+		drag = { a: t, b: t };
+	}
+	function up() {
+		if (!drag) return;
+		const lo = Math.min(drag.a, drag.b);
+		const hi = Math.max(drag.a, drag.b);
+		drag = undefined;
+		// A click or a tiny drag is no zoom.
+		if (x(hi) - x(lo) < 6) return;
+		const mid = (lo + hi) / 2;
+		const half = Math.max(hi - lo, MIN_RANGE_S) / 2;
+		onzoom?.(Math.floor(mid - half), Math.ceil(mid + half));
 	}
 </script>
 
@@ -67,10 +109,13 @@
 	<svg
 		{width}
 		height={H}
-		class="block touch-pan-y select-none"
+		class={['block touch-pan-y select-none', onzoom && 'cursor-crosshair']}
 		role="img"
 		aria-label="Chart"
 		onpointermove={move}
+		onpointerdown={down}
+		onpointerup={up}
+		onpointercancel={() => (drag = undefined)}
 		onpointerleave={() => (hover = undefined)}
 	>
 		{#each yTicks as { v, label } (v)}
@@ -79,9 +124,9 @@
 				>{label}</text
 			>
 		{/each}
-		{#each xTicks as t (t)}
+		{#each xTicks.ticks as t (t)}
 			<text x={x(t)} y={H - 6} text-anchor="middle" class="fill-muted text-[11px]"
-				>{timeFormat.format(t * 1000)}</text
+				>{tickLabel(t)}</text
 			>
 		{/each}
 		{#each runs as run (run[0].t)}
@@ -97,6 +142,15 @@
 				<circle cx={x(run[0].t)} cy={y(run[0].avg)} r="2" class="fill-accent" />
 			{/if}
 		{/each}
+		{#if drag}
+			<rect
+				x={x(Math.min(drag.a, drag.b))}
+				y={PAD.top}
+				width={Math.abs(x(drag.b) - x(drag.a))}
+				height={H - PAD.top - PAD.bottom}
+				class="fill-accent/10 stroke-accent/40"
+			/>
+		{/if}
 		{#if hover}
 			<line
 				x1={x(hover.t)}

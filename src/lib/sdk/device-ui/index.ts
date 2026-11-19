@@ -12,6 +12,7 @@ export { default as Slider } from './Slider.svelte';
 export { default as Notice } from './Notice.svelte';
 export { default as Segmented } from './Segmented.svelte';
 export { default as Dialog } from './Dialog.svelte';
+export { default as Popover } from './Popover.svelte';
 export { default as Input, input } from './Input.svelte';
 export { default as Select, select, type SelectGroup, type SelectOption } from './Select.svelte';
 export { default as Checkbox } from './Checkbox.svelte';
