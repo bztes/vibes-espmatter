@@ -782,6 +782,8 @@ static void metric_report(int index, const espm_metric_sink_t *sink)
         if (n.state != ONLINE) return;
         for (int i = 0; i < N_DIAGS; i++)
             if (n.diag_valid & (1u << i)) sink->metric(sink->arg, DIAGS[i].metric, "", DIAGS[i].unit, n.diag[i], DIAGS[i].kind);
+        if (n.battery >= 0) sink->metric(sink->arg, "device.battery", "", "%", n.battery, ESPM_GAUGE);
+        if (n.charge >= 0) sink->metric(sink->arg, "device.battery.level", "", "1", n.charge, ESPM_STATE);
         for (auto &e : n.eps) {
             snprintf(labels, sizeof(labels), "endpoint=%u", e.id);
             for (int i = 0; i < N_ATTRS; i++)

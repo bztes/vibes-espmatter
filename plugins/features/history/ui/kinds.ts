@@ -7,6 +7,7 @@ const STATE_NAMES: Record<string, Record<string, number>> = {
 	thermostat_system_mode: Thermostat.enums.SystemModeEnum,
 	fan_mode: FanControl.enums.FanModeEnum,
 	'device.online': { offline: 0, online: 1 },
+	'device.battery.level': { ok: 0, warning: 1, critical: 2 },
 	contact_closed: { open: 0, closed: 1 },
 	occupancy: { clear: 0, occupied: 1 }
 };
