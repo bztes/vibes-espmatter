@@ -14,7 +14,7 @@ static espm_metric_t s_metrics[MAX_METRICS];
 static int s_count;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
-void espm_metric_set(const char *name, const char *labels, const char *unit, double value)
+void espm_metric_set(const char *name, const char *labels, const char *unit, double value, espm_metric_kind_t kind)
 {
     portENTER_CRITICAL(&s_lock);
     int i = 0;
@@ -24,6 +24,7 @@ void espm_metric_set(const char *name, const char *labels, const char *unit, dou
         strlcpy(s_metrics[i].name, name, sizeof(s_metrics[i].name));
         strlcpy(s_metrics[i].labels, labels, sizeof(s_metrics[i].labels));
         strlcpy(s_metrics[i].unit, unit, sizeof(s_metrics[i].unit));
+        s_metrics[i].kind = kind;
     }
     if (i < s_count) {
         s_metrics[i].value = value;
@@ -69,18 +70,18 @@ void espm_metrics_own_report(const espm_metric_sink_t *sink)
 {
     void *a = sink->arg;
     sink->device(a, ESPM_DEVICE_ID, ESPM_DEVICE_NAME, nullptr);
-    sink->metric(a, "device.uptime", "", "s", esp_timer_get_time() / 1e6);
-    sink->metric(a, "device.memory.free", "", "By", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    sink->metric(a, "device.memory.min_free", "", "By", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    sink->metric(a, "device.uptime", "", "s", esp_timer_get_time() / 1e6, ESPM_GAUGE);
+    sink->metric(a, "device.memory.free", "", "By", heap_caps_get_free_size(MALLOC_CAP_INTERNAL), ESPM_GAUGE);
+    sink->metric(a, "device.memory.min_free", "", "By", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), ESPM_GAUGE);
 #if CONFIG_ESP_WIFI_ENABLED
     wifi_ap_record_t ap;
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) sink->metric(a, "device.wifi.rssi", "", "dBm", ap.rssi);
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) sink->metric(a, "device.wifi.rssi", "", "dBm", ap.rssi, ESPM_GAUGE);
 #endif
     // On the heap: called from several tasks, and only now and then.
     auto *snap = (espm_metric_t *)malloc(sizeof(espm_metric_t) * MAX_METRICS);
     if (!snap) return;
     int n = espm_metrics_snapshot(snap, MAX_METRICS);
-    for (int i = 0; i < n; i++) sink->metric(a, snap[i].name, snap[i].labels, snap[i].unit, snap[i].value);
+    for (int i = 0; i < n; i++) sink->metric(a, snap[i].name, snap[i].labels, snap[i].unit, snap[i].value, snap[i].kind);
     free(snap);
 }
 
@@ -97,6 +98,7 @@ static esp_err_t list(httpd_req_t *req)
         cJSON_AddStringToObject(m, "labels", snap[i].labels);
         cJSON_AddStringToObject(m, "unit", snap[i].unit);
         cJSON_AddNumberToObject(m, "value", snap[i].value);
+        cJSON_AddStringToObject(m, "kind", espm_metric_kind_name(snap[i].kind));
         cJSON_AddItemToArray(arr, m);
     }
     return espm_send_json(req, json);

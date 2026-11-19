@@ -56,8 +56,8 @@ export default defineFeature({
 			type: 'text',
 			key: 'table',
 			label: 'Table',
-			help: 'Gauges table of the collector’s ClickHouse exporter.',
-			default: 'telemetry.otel_metrics_gauge',
+			help: 'Metrics table name of the collector’s ClickHouse exporter, without _gauge or _sum.',
+			default: 'telemetry.otel_metrics',
 			required: true,
 			pattern: {
 				regex: /^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)?$/,
@@ -97,7 +97,15 @@ export default defineFeature({
 							id: 'a1b2c3d4/node-17',
 							name: 'Kitchen sensor',
 							own: false,
-							series: [{ metric: 'temperature', labels: 'endpoint=1', unit: 'Cel', value: 21.4 }]
+							series: [
+								{
+									metric: 'temperature',
+									labels: 'endpoint=1',
+									unit: 'Cel',
+									value: 21.4,
+									kind: 'gauge'
+								}
+							]
 						}
 					]
 				}
@@ -107,7 +115,7 @@ export default defineFeature({
 				path: '/api/v1/history',
 				summary: 'Past values of a series',
 				description:
-					'Aggregated by the database into at most 400 buckets (min. 1 minute) of avg/min/max. The database’s answer is passed through unchanged: its format depends on `source`.',
+					'Aggregated by the database into at most 400 buckets (min. 1 minute) of avg/min/max/last. The database’s answer is passed through unchanged: its format depends on `source`.',
 				auth: 'token',
 				params: [
 					{ name: 'device', type: 'string', description: 'Device id', required: true, in: 'query' },
@@ -128,7 +136,7 @@ export default defineFeature({
 					},
 					{ name: 'to', type: 'number', description: 'Unix seconds', required: true, in: 'query' }
 				],
-				response: { data: [[1763020800, 21.2, 20.9, 21.6]] }
+				response: { data: [[1763020800, 21.2, 20.9, 21.6, 21.4]] }
 			}
 		);
 		out.spot({ spot: 'device-icons', file: 'HistoryDeviceIcon.svelte' });

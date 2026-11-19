@@ -75,7 +75,7 @@ static void publish()
         espm_metric_set("temperature", "sensor=" ESPM_PAC_UID ",side=outside", "Cel", s.outside);
     }
     espm_attr_update(s_ep, FanControl::Id, FanControl::Attributes::FanMode::Id, esp_matter_enum8(s.fan == 0 ? 5 : s.fan <= 2 ? 1 : s.fan <= 4 ? 2 : 3));
-    espm_metric_set("heatpump_power", "sensor=" ESPM_PAC_UID, "1", s.power);
+    espm_metric_set("heatpump_power", "sensor=" ESPM_PAC_UID, "1", s.power, ESPM_STATE);
 }
 
 static void parse(const uint8_t *rx, size_t len)

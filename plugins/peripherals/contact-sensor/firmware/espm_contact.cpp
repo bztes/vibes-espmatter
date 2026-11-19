@@ -39,7 +39,7 @@ static void task(void *)
                 c->changes++;
                 c->changed_ms = now;
                 espm_attr_update(c->endpoint, BooleanState::Id, BooleanState::Attributes::StateValue::Id, esp_matter_bool(c->closed));
-                espm_metric_set("contact_closed", c->path.c_str() + 15, "1", c->closed);
+                espm_metric_set("contact_closed", c->path.c_str() + 15, "1", c->closed, ESPM_STATE);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(20));

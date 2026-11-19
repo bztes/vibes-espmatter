@@ -36,7 +36,10 @@ export function mockFetch(routes: () => Record<string, unknown>) {
 		const answers = routes();
 		await new Promise((r) => setTimeout(r, 120)); // feel like a device
 		for (const key of [`${method} ${url.pathname}`, method === 'GET' ? url.pathname : ''])
-			if (key && key in answers) return Response.json(answers[key]);
+			if (key && key in answers) {
+				const a = answers[key];
+				return Response.json(typeof a === 'function' ? a(url) : a);
+			}
 		if (url.pathname === '/api/v1/auth/me')
 			return Response.json({ ok: true, user: 'admin', admin: true });
 		if (method !== 'GET') return Response.json({ ok: true });

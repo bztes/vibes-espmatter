@@ -49,32 +49,33 @@ struct Attr {
     float scale;
     Kind kind;
     const char *metric, *unit; // exported as (null: not exported)
+    espm_metric_kind_t metric_kind;
 };
 static const Attr ATTRS[] = {
-    {OnOff::Id, 0x0000, "on", 1, K_BOOL, "on_off", "1"},
-    {LevelControl::Id, 0x0000, "level", 1, K_NUM, "level", "1"},
+    {OnOff::Id, 0x0000, "on", 1, K_BOOL, "on_off", "1", ESPM_STATE},
+    {LevelControl::Id, 0x0000, "level", 1, K_NUM, "level", "1", ESPM_GAUGE},
     // Color Control, tunable white. Lights without the CT feature answer UnsupportedAttribute.
-    {ColorControl::Id, 0x0007, "colorTemperature", 1, K_NUM, "color_temperature", "mired"}, // ColorTemperatureMireds
+    {ColorControl::Id, 0x0007, "colorTemperature", 1, K_NUM, "color_temperature", "mired", ESPM_GAUGE}, // ColorTemperatureMireds
     {ColorControl::Id, 0x400B, "colorTempMin", 1, K_NUM, nullptr, nullptr}, // ColorTempPhysicalMinMireds
     {ColorControl::Id, 0x400C, "colorTempMax", 1, K_NUM, nullptr, nullptr}, // ColorTempPhysicalMaxMireds
-    {WindowCovering::Id, 0x000E, "closedPercent", 0.01f, K_NUM, "closed_percent", "%"}, // CurrentPositionLiftPercent100ths
-    {DoorLock::Id, 0x0000, "lockState", 1, K_NUM, "lock_state", "1"},
-    {Thermostat::Id, 0x0000, "localTemperature", 0.01f, K_NUM, "thermostat_local_temperature", "Cel"},
-    {Thermostat::Id, 0x001C, "systemMode", 1, K_NUM, "thermostat_system_mode", "1"},
-    {Thermostat::Id, 0x0012, "heatingSetpoint", 0.01f, K_NUM, "thermostat_heating_setpoint", "Cel"},
-    {Thermostat::Id, 0x0011, "coolingSetpoint", 0.01f, K_NUM, "thermostat_cooling_setpoint", "Cel"},
+    {WindowCovering::Id, 0x000E, "closedPercent", 0.01f, K_NUM, "closed_percent", "%", ESPM_GAUGE}, // CurrentPositionLiftPercent100ths
+    {DoorLock::Id, 0x0000, "lockState", 1, K_NUM, "lock_state", "1", ESPM_STATE},
+    {Thermostat::Id, 0x0000, "localTemperature", 0.01f, K_NUM, "thermostat_local_temperature", "Cel", ESPM_GAUGE},
+    {Thermostat::Id, 0x001C, "systemMode", 1, K_NUM, "thermostat_system_mode", "1", ESPM_STATE},
+    {Thermostat::Id, 0x0012, "heatingSetpoint", 0.01f, K_NUM, "thermostat_heating_setpoint", "Cel", ESPM_GAUGE},
+    {Thermostat::Id, 0x0011, "coolingSetpoint", 0.01f, K_NUM, "thermostat_cooling_setpoint", "Cel", ESPM_GAUGE},
     {Thermostat::Id, 0x001B, "controlSequence", 1, K_NUM, nullptr, nullptr},
-    {FanControl::Id, 0x0000, "fanMode", 1, K_NUM, "fan_mode", "1"},
-    {Thermostat::Id, 0x0001, "outdoorTemperature", 0.01f, K_NUM, "thermostat_outdoor_temperature", "Cel"},
-    {TemperatureMeasurement::Id, 0x0000, "temperature", 0.01f, K_NUM, "temperature", "Cel"},
-    {RelativeHumidityMeasurement::Id, 0x0000, "humidity", 0.01f, K_NUM, "humidity", "%"},
-    {BooleanState::Id, 0x0000, "stateValue", 1, K_BOOL, "boolean_state", "1"},
-    {OccupancySensing::Id, 0x0000, "occupied", 1, K_BIT, "occupancy", "1"},
-    {IlluminanceMeasurement::Id, 0x0000, "illuminance", 1, K_LUX, "illuminance", "lx"},
-    {PressureMeasurement::Id, 0x0000, "pressure", 1, K_NUM, "pressure", "hPa"}, // 0.1 kPa = hPa
+    {FanControl::Id, 0x0000, "fanMode", 1, K_NUM, "fan_mode", "1", ESPM_STATE},
+    {Thermostat::Id, 0x0001, "outdoorTemperature", 0.01f, K_NUM, "thermostat_outdoor_temperature", "Cel", ESPM_GAUGE},
+    {TemperatureMeasurement::Id, 0x0000, "temperature", 0.01f, K_NUM, "temperature", "Cel", ESPM_GAUGE},
+    {RelativeHumidityMeasurement::Id, 0x0000, "humidity", 0.01f, K_NUM, "humidity", "%", ESPM_GAUGE},
+    {BooleanState::Id, 0x0000, "stateValue", 1, K_BOOL, "boolean_state", "1", ESPM_STATE},
+    {OccupancySensing::Id, 0x0000, "occupied", 1, K_BIT, "occupancy", "1", ESPM_STATE},
+    {IlluminanceMeasurement::Id, 0x0000, "illuminance", 1, K_LUX, "illuminance", "lx", ESPM_GAUGE},
+    {PressureMeasurement::Id, 0x0000, "pressure", 1, K_NUM, "pressure", "hPa", ESPM_GAUGE}, // 0.1 kPa = hPa
     // Electrical Power / Energy Measurement (e.g. plugs): ActivePower mW, CumulativeEnergyImported mWh.
-    {0x0090, 0x0008, "power", 0.001f, K_NUM, "power", "W"},
-    {0x0091, 0x0001, "energy", 1e-6f, K_FIELD0, "energy", "kWh"},
+    {0x0090, 0x0008, "power", 0.001f, K_NUM, "power", "W", ESPM_GAUGE},
+    {0x0091, 0x0001, "energy", 1e-6f, K_FIELD0, "energy", "kWh", ESPM_COUNTER},
     // Generic Switch: which gestures its buttons report (bit 4 multi-press, bit 5 action switch).
     {Switch::Id, 0xFFFC, "switchFeatures", 1, K_NUM, nullptr, nullptr}, // FeatureMap
 };
@@ -90,12 +91,13 @@ static constexpr int MAX_CLIENTS = 8;
 struct Diag {
     uint32_t cluster, attribute;
     const char *key, *metric, *unit;
+    espm_metric_kind_t kind;
 };
 static const Diag DIAGS[] = {
-    {GeneralDiagnostics::Id, 0x0002, "uptime", "device.uptime", "s"},                          // UpTime
-    {GeneralDiagnostics::Id, 0x0001, "rebootCount", "device.reboots", "1"},                    // RebootCount
-    {SoftwareDiagnostics::Id, 0x0001, "heapFree", "device.memory.free", "By"},                 // CurrentHeapFree
-    {SoftwareDiagnostics::Id, 0x0003, "heapHighWatermark", "device.memory.high_watermark", "By"}, // CurrentHeapHighWatermark
+    {GeneralDiagnostics::Id, 0x0002, "uptime", "device.uptime", "s", ESPM_GAUGE},                          // UpTime
+    {GeneralDiagnostics::Id, 0x0001, "rebootCount", "device.reboots", "1", ESPM_COUNTER},                    // RebootCount
+    {SoftwareDiagnostics::Id, 0x0001, "heapFree", "device.memory.free", "By", ESPM_GAUGE},                 // CurrentHeapFree
+    {SoftwareDiagnostics::Id, 0x0003, "heapHighWatermark", "device.memory.high_watermark", "By", ESPM_GAUGE}, // CurrentHeapHighWatermark
 };
 static constexpr int N_DIAGS = sizeof(DIAGS) / sizeof(DIAGS[0]);
 static constexpr int DIAG_INTERVAL_S = 60;
@@ -776,15 +778,15 @@ static void metric_report(int index, const espm_metric_sink_t *sink)
         snprintf(node_id, sizeof(node_id), "%llu", (unsigned long long)n.id);
         snprintf(id, sizeof(id), "%s/node-%s", ESPM_DEVICE_ID, node_id);
         sink->device(sink->arg, id, n.name, node_id);
-        sink->metric(sink->arg, "device.online", "", "1", n.state == ONLINE);
+        sink->metric(sink->arg, "device.online", "", "1", n.state == ONLINE, ESPM_STATE);
         if (n.state != ONLINE) return;
         for (int i = 0; i < N_DIAGS; i++)
-            if (n.diag_valid & (1u << i)) sink->metric(sink->arg, DIAGS[i].metric, "", DIAGS[i].unit, n.diag[i]);
+            if (n.diag_valid & (1u << i)) sink->metric(sink->arg, DIAGS[i].metric, "", DIAGS[i].unit, n.diag[i], DIAGS[i].kind);
         for (auto &e : n.eps) {
             snprintf(labels, sizeof(labels), "endpoint=%u", e.id);
             for (int i = 0; i < N_ATTRS; i++)
                 if (ATTRS[i].metric && (e.valid & (1u << i)) && !(e.null & (1u << i)))
-                    sink->metric(sink->arg, ATTRS[i].metric, labels, ATTRS[i].unit, e.val[i]);
+                    sink->metric(sink->arg, ATTRS[i].metric, labels, ATTRS[i].unit, e.val[i], ATTRS[i].metric_kind);
         }
     });
 }

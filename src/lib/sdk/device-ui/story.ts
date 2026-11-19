@@ -4,7 +4,8 @@ import type { SpotItem } from './spots.svelte';
 /**
  * A widget preview for /dev/ui: `stories.ts` in a plugin folder exports `Story[]` as default (also
  * in the shell preview) and as `parts` (components inside widgets, e.g. a dialog's content). The
- * device API is mocked from `api`: keys are `GET /path` (or just `/path`) and `POST /path`.
+ * device API is mocked from `api`: keys are `GET /path` (or just `/path`) and `POST /path`; an
+ * answer may be a function of the request URL.
  */
 export interface Story {
 	name: string;

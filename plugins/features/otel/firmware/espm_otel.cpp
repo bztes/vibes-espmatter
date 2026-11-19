@@ -98,13 +98,21 @@ static void batch_device(Batch &b, const char *id, const char *name, const char 
     b.count++;
 }
 
-static void batch_metric(Batch &b, const char *name, const char *labels, const char *unit, double value)
+static void batch_metric(Batch &b, const char *name, const char *labels, const char *unit, double value,
+                         espm_metric_kind_t kind)
 {
     if (!b.metrics) return;
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "name", name);
     cJSON_AddStringToObject(m, "unit", unit);
-    cJSON *points = cJSON_AddArrayToObject(cJSON_AddObjectToObject(m, "gauge"), "dataPoints");
+    // Counters as monotonic cumulative sums; states stay gauges (OTel has no type for them).
+    bool sum = kind == ESPM_COUNTER;
+    cJSON *data = cJSON_AddObjectToObject(m, sum ? "sum" : "gauge");
+    if (sum) {
+        cJSON_AddNumberToObject(data, "aggregationTemporality", 2); // CUMULATIVE
+        cJSON_AddBoolToObject(data, "isMonotonic", true);
+    }
+    cJSON *points = cJSON_AddArrayToObject(data, "dataPoints");
     cJSON *p = cJSON_CreateObject();
     cJSON_AddStringToObject(p, "timeUnixNano", b.now_ns);
     cJSON_AddNumberToObject(p, "asDouble", value);
@@ -126,8 +134,8 @@ static void batch_metric(Batch &b, const char *name, const char *labels, const c
 
 static const espm_metric_sink_t s_sink = {
     [](void *arg, const char *id, const char *name, const char *node) { batch_device(*(Batch *)arg, id, name, node); },
-    [](void *arg, const char *name, const char *labels, const char *unit, double value) {
-        batch_metric(*(Batch *)arg, name, labels, unit, value);
+    [](void *arg, const char *name, const char *labels, const char *unit, double value, espm_metric_kind_t kind) {
+        batch_metric(*(Batch *)arg, name, labels, unit, value, kind);
     },
     nullptr,
 };

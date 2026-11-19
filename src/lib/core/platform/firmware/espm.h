@@ -152,13 +152,21 @@ bool espm_online();
 // ---------------------------------------------------------------------------------------------
 
 void espm_metrics_init();
-/** Set a gauge, e.g. espm_metric_set("temperature", "sensor=k3f9a1", "Cel", 21.4). Any task. */
-void espm_metric_set(const char *name, const char *labels, const char *unit, double value);
+/** Gauge: a reading. Counter: only grows (exported as a monotonic sum). State: one of distinct values. */
+enum espm_metric_kind_t : uint8_t { ESPM_GAUGE, ESPM_COUNTER, ESPM_STATE };
+inline const char *espm_metric_kind_name(espm_metric_kind_t k)
+{
+    return k == ESPM_COUNTER ? "counter" : k == ESPM_STATE ? "state" : "gauge";
+}
+/** Set a value, e.g. espm_metric_set("temperature", "sensor=k3f9a1", "Cel", 21.4). Any task. */
+void espm_metric_set(const char *name, const char *labels, const char *unit, double value,
+                     espm_metric_kind_t kind = ESPM_GAUGE);
 
 struct espm_metric_t {
     char name[32];
     char labels[48];
     char unit[12];
+    espm_metric_kind_t kind;
     double value;
     int64_t updated_us;
 };
@@ -172,7 +180,8 @@ int espm_metrics_snapshot(espm_metric_t *out, int max);
 struct espm_metric_sink_t {
     /** Starts a device; the metrics until the next call belong to it. `id` is globally unique. */
     void (*device)(void *arg, const char *id, const char *name, const char *matter_node_id);
-    void (*metric)(void *arg, const char *name, const char *labels, const char *unit, double value);
+    void (*metric)(void *arg, const char *name, const char *labels, const char *unit, double value,
+                   espm_metric_kind_t kind);
     void *arg;
 };
 struct espm_metric_source_t {

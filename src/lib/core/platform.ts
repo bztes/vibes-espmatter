@@ -247,7 +247,9 @@ const METRICS: ApiRoute = {
 		'Every value a peripheral publishes (`espm_metric_set`), e.g. for Prometheus-style scraping or OpenTelemetry.',
 	auth: 'token',
 	response: {
-		metrics: [{ name: 'temperature', labels: 'sensor=k3f9a1', unit: 'Cel', value: 21.4 }]
+		metrics: [
+			{ name: 'temperature', labels: 'sensor=k3f9a1', unit: 'Cel', value: 21.4, kind: 'gauge' }
+		]
 	}
 };
 

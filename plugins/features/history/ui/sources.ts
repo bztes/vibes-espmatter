@@ -5,19 +5,24 @@ import { formatBytes, formatDuration, formatNumber } from '#sdk/device-ui';
  * points. A new source needs a query in the firmware and a parser here.
  */
 
-/** A bucket: average, minimum and maximum of the values in it. `t` in unix seconds. */
+/** A bucket: average, minimum, maximum and last of the values in it. `t` in unix seconds. */
 export interface Point {
 	t: number;
 	avg: number;
 	min: number;
 	max: number;
+	last: number;
 }
+
+/** Gauge: a reading. Counter: only grows. State: one of distinct values. */
+export type Kind = 'gauge' | 'counter' | 'state';
 
 export interface Series {
 	metric: string;
 	labels: string;
 	unit: string;
 	value: number;
+	kind: Kind;
 }
 
 export interface Device {
@@ -40,16 +45,22 @@ export const isDiagnostic = (s: Series) => s.metric.startsWith('device.');
 
 const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN);
 
-/** Points in time order, without buckets that carry no number. */
+/** Points in time order, without buckets that carry no number. Older firmware sends no `last`. */
 function points(rows: unknown[][]): Point[] {
 	return rows
-		.map(([t, avg, min, max]) => ({ t: num(t), avg: num(avg), min: num(min), max: num(max) }))
-		.filter((p) => [p.t, p.avg, p.min, p.max].every(Number.isFinite))
+		.map(([t, avg, min, max, last = avg]) => ({
+			t: num(t),
+			avg: num(avg),
+			min: num(min),
+			max: num(max),
+			last: num(last)
+		}))
+		.filter((p) => [p.t, p.avg, p.min, p.max, p.last].every(Number.isFinite))
 		.sort((a, b) => a.t - b.t);
 }
 
 const PARSERS: Record<string, (raw: unknown) => Point[]> = {
-	/** FORMAT JSONCompact: `{ data: [[t, avg, min, max], …] }` (nan/inf as null). */
+	/** FORMAT JSONCompact: `{ data: [[t, avg, min, max, last], …] }` (nan/inf as null). */
 	clickhouse(raw) {
 		const data = (raw as { data?: unknown })?.data;
 		if (!Array.isArray(data)) throw new Error('Unexpected answer from ClickHouse');
@@ -111,7 +122,7 @@ export function axis(lo: number, hi: number, unit: string, count = 4) {
 }
 
 /** Shortest distance between buckets: the step the database used. */
-function stepOf(pts: Point[]): number {
+export function stepOf(pts: Point[]): number {
 	let step = Infinity;
 	for (let i = 1; i < pts.length; i++) step = Math.min(step, pts[i].t - pts[i - 1].t);
 	return Number.isFinite(step) ? step : 60;

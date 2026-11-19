@@ -77,13 +77,15 @@ struct Lister {
     char node[24];
 };
 
-static void add_series(cJSON *series, const char *metric, const char *labels, const char *unit, double value)
+static void add_series(cJSON *series, const char *metric, const char *labels, const char *unit, double value,
+                       espm_metric_kind_t kind)
 {
     cJSON *s = cJSON_CreateObject();
     cJSON_AddStringToObject(s, "metric", metric);
     cJSON_AddStringToObject(s, "labels", labels);
     cJSON_AddStringToObject(s, "unit", unit);
     cJSON_AddNumberToObject(s, "value", value);
+    cJSON_AddStringToObject(s, "kind", espm_metric_kind_name(kind));
     cJSON_AddItemToArray(series, s);
 }
 
@@ -109,11 +111,12 @@ static void list_device(void *arg, const char *id, const char *name, const char 
     l.series = visible ? add_device(l.devices, id, name, l.node) : nullptr;
 }
 
-static void list_metric(void *arg, const char *name, const char *labels, const char *unit, double value)
+static void list_metric(void *arg, const char *name, const char *labels, const char *unit, double value,
+                        espm_metric_kind_t kind)
 {
     Lister &l = *(Lister *)arg;
     if (!l.series || (l.node[0] && !node_visible(l.node, labels))) return;
-    add_series(l.series, name, labels, unit, value);
+    add_series(l.series, name, labels, unit, value, kind);
 }
 
 static esp_err_t series(httpd_req_t *req)
@@ -133,34 +136,44 @@ static esp_err_t series(httpd_req_t *req)
 // ---- One series ----
 
 struct Finder {
-    const char *id;
-    bool found;
+    const char *id, *metric, *labels;
+    bool in, found;
     char node[24];
+    espm_metric_kind_t kind;
 };
 
 static void find_device(void *arg, const char *id, const char *, const char *node)
 {
     Finder &f = *(Finder *)arg;
-    if (f.found || strcmp(id, f.id)) return;
+    f.in = !f.found && strcmp(id, f.id) == 0;
+    if (!f.in) return;
     f.found = true;
     strlcpy(f.node, node ? node : "", sizeof(f.node));
 }
 
-/** 404 / 403 sent unless the caller may read this series. */
-static bool allowed(httpd_req_t *req, const char *device, const char *labels)
+static void find_metric(void *arg, const char *name, const char *labels, const char *, double,
+                        espm_metric_kind_t kind)
 {
-    bool ok = espm_caller_admin();
-    if (strcmp(device, ESPM_DEVICE_ID) != 0) {
-        Finder f = {device, false, {}};
-        espm_metric_sink_t sink = {find_device, [](void *, const char *, const char *, const char *, double) {}, &f};
-        int remotes = espm_metrics_remote_count();
-        for (int i = 0; i < remotes && !f.found; i++) espm_metrics_remote_report(i, &sink);
-        if (!f.found) {
-            espm_send_error(req, 404, "unknown device");
-            return false;
-        }
-        if (f.node[0]) ok = node_visible(f.node, labels);
+    Finder &f = *(Finder *)arg;
+    if (f.in && strcmp(name, f.metric) == 0 && strcmp(labels, f.labels) == 0) f.kind = kind;
+}
+
+/** 404 / 403 sent unless the caller may read this series; else its kind (gauge if not reported now). */
+static bool allowed(httpd_req_t *req, const char *device, const char *metric, const char *labels,
+                    espm_metric_kind_t *kind)
+{
+    Finder f = {device, metric, labels, false, false, {}, ESPM_GAUGE};
+    espm_metric_sink_t sink = {find_device, find_metric, &f};
+    bool own = strcmp(device, ESPM_DEVICE_ID) == 0;
+    if (own) espm_metrics_own_report(&sink);
+    int remotes = own ? 0 : espm_metrics_remote_count();
+    for (int i = 0; i < remotes && !f.found; i++) espm_metrics_remote_report(i, &sink);
+    if (!f.found) {
+        espm_send_error(req, 404, "unknown device");
+        return false;
     }
+    *kind = f.kind;
+    bool ok = f.node[0] ? node_visible(f.node, labels) : espm_caller_admin();
     if (!ok) espm_send_error(req, 403, "forbidden");
     return ok;
 }
@@ -196,10 +209,10 @@ struct Request {
 };
 
 #if ESPM_HISTORY_CLICKHOUSE
-/** Gauges as the collector's ClickHouse exporter stores them; values only as query parameters. */
+/** Tables of the collector's ClickHouse exporter (gauges or sums); values only as query parameters. */
 static const char *CLICKHOUSE_SQL =
     "SELECT toUInt32(toStartOfInterval(toDateTime(TimeUnix), INTERVAL {step:UInt32} SECOND)) AS t,"
-    " avg(Value), min(Value), max(Value) FROM %s"
+    " avg(Value), min(Value), max(Value), argMax(Value, TimeUnix) FROM %s_%s"
     " WHERE ResourceAttributes['service.instance.id'] = {device:String} AND MetricName = {metric:String}"
     " AND hasAll(arrayMap((k, v) -> concat(k, '=', v), mapKeys(Attributes), mapValues(Attributes)),"
     " {labels:Array(String)})"
@@ -219,12 +232,13 @@ static bool table_name(const char *s)
     return true;
 }
 
-static bool build(Request &r, const char *device, const char *metric, const char *labels, long long from,
-                  long long to, long long step)
+static bool build(Request &r, const char *device, const char *metric, const char *labels, bool counter,
+                  long long from, long long to, long long step)
 {
+    // The exporter's metrics table name; it adds _gauge, _sum, …
     const char *table = ESPM_HISTORY_TABLE;
     if (!table_name(table)) return false;
-    if (asprintf(&r.body, CLICKHOUSE_SQL, table) < 0) return false;
+    if (asprintf(&r.body, CLICKHOUSE_SQL, table, counter ? "sum" : "gauge") < 0) return false;
 
     // Array(String) literal: ['k=v','k2=v2'] – the values contain no quotes (plain()).
     char arr[128] = "[";
@@ -285,12 +299,13 @@ static esp_err_t history(httpd_req_t *req)
     if (!plain(device, sizeof(device), false) || !plain(metric, sizeof(metric), false) ||
         !plain(labels, sizeof(labels), true) || from <= 0 || to <= from || to - from > MAX_RANGE_S)
         return espm_send_error(req, 400, "device, metric, from and to (unix seconds) needed");
-    if (!allowed(req, device, labels)) return ESP_OK;
+    espm_metric_kind_t kind;
+    if (!allowed(req, device, metric, labels, &kind)) return ESP_OK;
     long long step = (to - from + MAX_POINTS - 1) / MAX_POINTS;
     if (step < MIN_STEP_S) step = MIN_STEP_S;
 
     Request r = {};
-    if (!build(r, device, metric, labels, from, to, step)) {
+    if (!build(r, device, metric, labels, kind == ESPM_COUNTER, from, to, step)) {
         free(r.body);
         return espm_send_error(req, 500, "history source not set up (URL, table)");
     }

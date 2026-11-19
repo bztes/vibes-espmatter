@@ -6,22 +6,22 @@ describe('history sources', () => {
 		const raw = {
 			meta: [{ name: 't', type: 'UInt32' }],
 			data: [
-				[1200, 21.5, 21, 22],
+				[1200, 21.5, 21, 22, 21.8],
 				[600, '20.5', 20, 21],
-				[1800, null, null, null]
+				[1800, null, null, null, null]
 			],
 			rows: 3
 		};
 		expect(parse('clickhouse', raw)).toEqual([
-			{ t: 600, avg: 20.5, min: 20, max: 21 },
-			{ t: 1200, avg: 21.5, min: 21, max: 22 }
+			{ t: 600, avg: 20.5, min: 20, max: 21, last: 20.5 },
+			{ t: 1200, avg: 21.5, min: 21, max: 22, last: 21.8 }
 		]);
 		expect(() => parse('clickhouse', { exception: 'x' })).toThrow();
 		expect(() => parse('nope', {})).toThrow(/Unknown/);
 	});
 
 	it('break lines at gaps', () => {
-		const p = (t: number) => ({ t, avg: 1, min: 1, max: 1 });
+		const p = (t: number) => ({ t, avg: 1, min: 1, max: 1, last: 1 });
 		expect(segments([p(0), p(60), p(120), p(600), p(660)]).map((s) => s.length)).toEqual([3, 2]);
 	});
 

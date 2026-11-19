@@ -1,9 +1,19 @@
-<!-- History of a device: value picker, now/min/avg/max and the chart. -->
+<!-- History of a device: value picker, stats that fit the kind of value, and the chart. -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { Notice, Select, Spinner, Stat, Stored, api, errorText } from '#sdk/device-ui';
+	import {
+		Notice,
+		Select,
+		Spinner,
+		Stat,
+		Stored,
+		api,
+		errorText,
+		formatDuration
+	} from '#sdk/device-ui';
 	import Chart from './Chart.svelte';
 	import RangePicker from './RangePicker.svelte';
+	import { increase, span, timeInStates, valueText } from './kinds';
 	import { catalog, loadCatalog } from './catalog.svelte';
 	import {
 		format,
@@ -62,7 +72,7 @@
 		const option = (s: Series) => ({
 			value: seriesKey(s),
 			label: label(s),
-			meta: [format(s.value, s.unit)]
+			meta: [valueText(s, s.value)]
 		});
 		return [
 			{ label: '', options: all.filter((s) => !isDiagnostic(s)).map(option) },
@@ -70,8 +80,9 @@
 		].filter((g) => g.options.length);
 	});
 
-	let points = $state<Point[]>([]);
-	let shown = $state({ from: 0, to: 1 });
+	let loaded = $state<Point[]>([]);
+	// What `loaded` was asked for: another value shows nothing until its own points arrive.
+	let shown = $state({ from: 0, to: 1, wanted: '' });
 	let loading = $state(false);
 	let error = $state<string>();
 
@@ -79,7 +90,11 @@
 	const wanted = $derived(
 		device && series
 			? String(
-					new URLSearchParams({ device: device.id, metric: series.metric, labels: series.labels })
+					new URLSearchParams({
+						device: device.id,
+						metric: series.metric,
+						labels: series.labels
+					})
 				)
 			: undefined
 	);
@@ -88,21 +103,22 @@
 	let request = 0;
 	$effect(() => {
 		const source = catalog.current?.source;
-		if (!source || !wanted) return;
+		const query = wanted;
+		if (!source || !query) return;
 		// A preset reaches up to now again on every load.
 		const { from, to } = view.preset ? presetView(view.preset) : view;
 		const mine = ++request;
 		loading = true;
-		api(`/api/v1/history?${wanted}&from=${from}&to=${to}`)
+		api(`/api/v1/history?${query}&from=${from}&to=${to}`)
 			.then((raw) => {
 				if (mine !== request) return;
-				points = parse(source, raw);
-				shown = { from, to };
+				loaded = parse(source, raw);
+				shown = { from, to, wanted: query };
 				error = undefined;
 			})
 			.catch((e) => {
 				if (mine !== request) return;
-				points = [];
+				loaded = [];
 				error = errorText(e);
 			})
 			.finally(() => {
@@ -110,8 +126,30 @@
 			});
 	});
 
-	const stats = $derived.by(() => {
-		if (!points.length) return undefined;
+	const points = $derived(shown.wanted === wanted ? loaded : []);
+
+	// Besides "now": what makes sense for the kind of value.
+	const stats = $derived.by((): { label: string; value?: string }[] => {
+		if (!series) return [];
+		const has = points.length > 0;
+		const { from, to } = shown;
+		const show = (v: number, ok = true) => (has && ok ? format(v, series.unit) : undefined);
+		if (series.kind === 'counter') {
+			const inc = increase(points);
+			const days = span(points, from, to) / 86400;
+			return [
+				{ label: 'Increase', value: show(inc) },
+				{ label: 'Per day', value: show(inc / days, days > 0) }
+			];
+		}
+		if (series.kind === 'state') {
+			const states = timeInStates(points, from, to);
+			const total = states.reduce((a, s) => a + s.seconds, 0);
+			return states.slice(0, 3).map(({ value, seconds }) => ({
+				label: valueText(series, value),
+				value: `${formatDuration(seconds)} · ${Math.round((seconds / total) * 100)} %`
+			}));
+		}
 		let min = Infinity;
 		let max = -Infinity;
 		let sum = 0;
@@ -120,7 +158,11 @@
 			max = Math.max(max, p.max);
 			sum += p.avg;
 		}
-		return { min, max, avg: sum / points.length };
+		return [
+			{ label: 'Minimum', value: show(min) },
+			{ label: 'Average', value: show(sum / points.length) },
+			{ label: 'Maximum', value: show(max) }
+		];
 	});
 </script>
 
@@ -146,10 +188,10 @@
 
 	{#if series}
 		<div class="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
-			<Stat label="Now" value={format(series.value, series.unit)} />
-			<Stat label="Minimum" value={stats && format(stats.min, series.unit)} />
-			<Stat label="Average" value={stats && format(stats.avg, series.unit)} />
-			<Stat label="Maximum" value={stats && format(stats.max, series.unit)} />
+			<Stat label="Now" value={valueText(series, series.value)} />
+			{#each stats as s (s.label)}
+				<Stat label={s.label} value={s.value} />
+			{/each}
 		</div>
 	{/if}
 
@@ -166,7 +208,7 @@
 		<div class={['transition-opacity', loading && 'opacity-50']}>
 			<Chart
 				{points}
-				unit={series.unit}
+				{series}
 				from={shown.from}
 				to={shown.to}
 				onzoom={(from, to) => setView({ from, to })}
