@@ -1,10 +1,9 @@
 <!--
   Scenes of the account and those granted to it (admins: everyone's), set by the hub (espm_scenes.cpp): how several
-  endpoints should be, applied at once. One button each to activate it, highlighted while the
-  devices are as it sets them; made and edited in a dialog. New members start from the endpoint's current state.
+  endpoints should be, applied at once. Listed, made and edited here; activated from ScenesBar on the dashboard.
+  New members start from the endpoint's current state.
 -->
 <script lang="ts">
-	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
 	import {
 		api,
@@ -29,7 +28,6 @@
 		type Member,
 		type Scene
 	} from './automations';
-	import { runScene } from './scenes';
 
 	const MAX_MEMBERS = 12;
 
@@ -133,73 +131,52 @@
 			await api(`/api/v1/controller/scenes/${scene.id}`, { method: 'DELETE' });
 			open = false;
 		}, `${scene.name} deleted.`);
-
-	const activate = (scene: Scene) =>
-		run(async () => {
-			const skipped = await runScene(scene.id);
-			if (skipped)
-				status = { tone: 'info', text: `${skipped} device(s) skipped: you may not control them.` };
-		});
 </script>
 
-{#if scenes.current && nodes.current && (list.length || targets.length)}
-	<section class="grid gap-2" aria-label="Scenes">
-		<div class="flex items-center gap-2 px-1">
-			<h3 class="m-0 flex-1 text-base font-semibold">Scenes</h3>
-			{#if targets.length && !full}
-				<Button size="sm" variant="ghost" onclick={() => edit()}
-					><Plus size={14} /> New scene</Button
-				>
-			{/if}
-		</div>
-		{#if list.length}
-			<div class="flex flex-wrap gap-2">
-				{#each list as scene (scene.id)}
-					<div
-						class={[
-							'flex h-9 items-stretch overflow-hidden rounded-full border text-sm font-medium transition-colors',
-							scene.active
-								? 'border-accent bg-accent text-accent-fg'
-								: 'border-border-strong bg-surface text-fg'
-						]}
-					>
-						<button
-							type="button"
-							aria-pressed={scene.active}
-							disabled={busy || !scene.members.length}
-							title={scene.active ? 'Active: the devices are as it sets them' : 'Activate'}
-							class={[
-								'flex items-center gap-1.5 pr-2 pl-4 disabled:opacity-50',
-								scene.active ? 'hover:bg-accent/90' : 'hover:bg-surface-2'
-							]}
-							onclick={() => activate(scene)}
-						>
-							{scene.name}
-							{#if !scene.mine}<span class="text-xs opacity-70">· {scene.owner}</span>{/if}
-						</button>
-						{#if scene.access === 'write'}<button
-								type="button"
-								aria-label="Edit {scene.name}"
-								class={[
-									'grid w-8 place-items-center border-l pr-1',
-									scene.active
-										? 'border-accent-fg/25 hover:bg-accent/90'
-										: 'border-border text-muted hover:bg-surface-2 hover:text-fg'
-								]}
-								onclick={() => edit(scene)}><Pencil size={13} /></button
-							>{:else}<span class="w-3"></span>{/if}
-					</div>
-				{/each}
-			</div>
-		{:else}
-			<p class="m-0 px-1 text-sm text-muted">
-				No scenes yet – a scene sets several devices at once, e.g. “Movie night”.
-			</p>
+{#if scenes.current && nodes.current}
+	<div class="mb-3 flex items-center gap-2">
+		<p class="m-0 flex-1 text-xs text-muted">
+			A scene sets several devices at once, e.g. “Movie night”.
+		</p>
+		{#if targets.length}
+			<Button variant="primary" disabled={full} onclick={() => edit()}
+				><Plus size={16} /> Add scene</Button
+			>
 		{/if}
-		{#if status && !open}<Notice tone={status.tone}>{status.text}</Notice>{/if}
-	</section>
-{:else if scenes.error}
-	<p class="text-sm text-err">{scenes.error}</p>
+	</div>
+	{#if list.length}
+		<ul class="grid gap-1.5">
+			{#each list as scene (scene.id)}
+				<li
+					class="flex items-center gap-3 rounded-lg border border-border bg-surface-2/50 px-3 py-2"
+				>
+					<div class="grid min-w-0 flex-1 gap-0.5 text-sm">
+						<span class="truncate font-semibold">{scene.name}</span>
+						<span class="truncate text-xs text-muted">
+							{scene.members.map((m) => endpointName(targets, m.node, m.endpoint)).join(', ') ||
+								'No devices'}
+						</span>
+					</div>
+					{#if !scene.mine}<Badge>{scene.owner}</Badge>{/if}
+					{#if scene.active}<Badge>On</Badge>{/if}
+					{#if scene.access === 'write'}
+						<Button size="sm" variant="ghost" disabled={busy} onclick={() => edit(scene)}
+							>Edit</Button
+						>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+	{:else if targets.length}
+		<p class="text-sm text-muted">No scenes yet.</p>
+	{:else}
+		<p class="text-sm text-muted">There are no devices you may control yet.</p>
+	{/if}
+	{#if status && !open}<div class="mt-3">
+			<Notice tone={status.tone}>{status.text}</Notice>
+		</div>{/if}
+{:else if scenes.error || nodes.error}
+	<p class="text-sm text-err">{scenes.error ?? nodes.error}</p>
 {/if}
 
 <Dialog bind:open wide title={editing ? 'Edit scene' : 'New scene'} onsubmit={save}>

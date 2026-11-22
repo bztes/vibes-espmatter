@@ -80,15 +80,12 @@ describe('hub', () => {
 		expect(a.pages.map((p) => p.id)).toEqual(['dashboard', 'automations', 'settings']);
 		const shown = (page: string) =>
 			a.widgets.filter((w) => w.page === page && w.access === 'account').map((w) => w.file);
-		expect(shown('automations')).toEqual(['AutomationsWidget.svelte']);
-		// Scenes on the dashboard; without one, next to the automations.
-		expect(shown('dashboard')).toContain('ScenesWidget.svelte');
+		expect(shown('automations')).toEqual(['AutomationsWidget.svelte', 'ScenesWidget.svelte']);
+		// Scenes activated on the dashboard, managed next to the automations.
+		expect(shown('dashboard')).toContain('ScenesBar.svelte');
 		hub.features['matter-controller'].dashboard = false;
 		const b = assemble(hub, { version: 1, buildId: 'b1' });
-		expect(b.widgets.filter((w) => w.page === 'automations').map((w) => w.file)).toEqual([
-			'AutomationsWidget.svelte',
-			'ScenesWidget.svelte'
-		]);
+		expect(b.widgets.some((w) => w.file === 'ScenesBar.svelte')).toBe(false);
 		const [main] = generate(a, (ref) => `// ${ref.dir}/${ref.file}`, 1);
 		const config = main.files['main/espm_config.h'];
 		expect(config).toContain('#define ESPM_CTRL_AUTOMATIONS 1');

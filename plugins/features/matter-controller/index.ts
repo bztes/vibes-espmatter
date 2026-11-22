@@ -599,16 +599,25 @@ export default defineFeature({
 					order: 1,
 					access: 'account'
 				},
-				// Scenes on the dashboard; without one, on the automations page.
 				{
-					page: settings.dashboard ? 'dashboard' : 'automations',
+					page: 'automations',
 					file: 'ScenesWidget.svelte',
 					title: 'Scenes',
-					plain: true,
-					order: settings.dashboard ? 0 : 2,
+					wide: true,
+					order: 2,
 					access: 'account'
 				}
 			);
+			// Activated from the dashboard, managed on the automations page.
+			if (settings.dashboard)
+				out.ui({
+					page: 'dashboard',
+					file: 'ScenesBar.svelte',
+					title: 'Scenes',
+					plain: true,
+					order: 0,
+					access: 'account'
+				});
 		}
 		if (settings.dashboard) {
 			out.page({

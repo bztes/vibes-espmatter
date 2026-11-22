@@ -3,6 +3,7 @@ import AccountsWidget from './ui/AccountsWidget.svelte';
 import AutomationsWidget from './ui/AutomationsWidget.svelte';
 import DevicesWidget from './ui/DevicesWidget.svelte';
 import NodesWidget from './ui/NodesWidget.svelte';
+import ScenesBar from './ui/ScenesBar.svelte';
 import ScenesWidget from './ui/ScenesWidget.svelte';
 
 const ok = { ok: true };
@@ -563,12 +564,24 @@ export default [
 	{
 		name: 'Scenes',
 		component: ScenesWidget,
+		page: 'automations',
 		wide: true,
-		plain: true,
 		api: {
 			'POST /api/v1/controller/scenes': { ok: true, id: 3 },
 			'/api/v1/controller/scenes': SCENES,
 			'/api/v1/controller/nodes': { nodes: AUTOMATION_NODES }
+		}
+	},
+	{
+		name: 'Scene bar',
+		component: ScenesBar,
+		wide: true,
+		plain: true,
+		api: {
+			'POST /api/v1/controller/scenes/1/activate': { ok: true, skipped: 0 },
+			'POST /api/v1/controller/scenes/2/activate': { ok: true, skipped: 0 },
+			'POST /api/v1/controller/scenes/3/activate': { ok: true, skipped: 0 },
+			'/api/v1/controller/scenes': SCENES
 		}
 	}
 ] satisfies Story[];
