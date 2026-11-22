@@ -11,7 +11,7 @@
 				danger: 'bg-err text-white hover:bg-err/90',
 				link: 'text-accent underline underline-offset-2 hover:text-accent/80'
 			},
-			size: { sm: 'h-7 px-2.5 text-xs', md: 'h-9 px-3.5 text-sm', icon: 'size-8' }
+			size: { sm: 'h-8 px-2.5 text-xs', md: 'h-9 px-3.5 text-sm', icon: 'size-9' }
 		},
 		// Links sit in running text: no box.
 		compoundVariants: [{ variant: 'link', class: 'h-auto rounded-sm px-0' }],

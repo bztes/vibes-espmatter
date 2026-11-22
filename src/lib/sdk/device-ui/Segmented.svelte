@@ -6,18 +6,21 @@
 		options,
 		label,
 		disabled = false,
+		size = 'md',
 		onchange
 	}: {
 		value?: string;
 		options: { value: string; label: string }[];
 		label: string;
 		disabled?: boolean;
+		size?: 'sm' | 'md';
 		onchange?: (value: string) => void;
 	} = $props();
 
 	const item = tv({
-		base: 'min-w-fit flex-1 rounded-md px-2.5 py-1 text-sm whitespace-nowrap font-medium transition-colors disabled:opacity-50',
+		base: 'inline-flex min-w-fit flex-1 items-center justify-center rounded-md px-2.5 whitespace-nowrap font-medium transition-colors disabled:opacity-50',
 		variants: {
+			size: { sm: 'h-7 text-xs', md: 'h-8 text-sm' },
 			active: { true: 'bg-surface text-fg shadow-card', false: 'text-muted hover:text-fg' }
 		}
 	});
@@ -34,7 +37,7 @@
 			role="radio"
 			aria-checked={value === option.value}
 			{disabled}
-			class={item({ active: value === option.value })}
+			class={item({ size, active: value === option.value })}
 			onclick={() => {
 				value = option.value;
 				onchange?.(option.value);

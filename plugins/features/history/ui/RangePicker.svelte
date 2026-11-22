@@ -4,7 +4,7 @@
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ZoomOut from '@lucide/svelte/icons/zoom-out';
-	import { Button, Input, Popover, button } from '#sdk/device-ui';
+	import { Button, Input, Popover } from '#sdk/device-ui';
 	import {
 		MAX_RANGE_S,
 		PRESET_GROUPS,
@@ -37,6 +37,9 @@
 			toText = toLocalInput(Math.min(view.to, nowS()));
 		}
 	}
+
+	const step =
+		'flex w-9 shrink-0 items-center justify-center text-muted hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40';
 
 	function pick(v: View) {
 		open = false;
@@ -85,34 +88,37 @@
 {/snippet}
 
 <!-- Fixed width, so a longer label doesn't move the layout. -->
-<div class="flex items-center rounded-lg bg-surface-2 p-0.5" bind:this={root}>
-	<button
-		type="button"
-		class={button({ variant: 'ghost', size: 'icon', class: 'size-7 text-muted' })}
-		aria-label="Earlier"
-		onclick={() => onchange(shift(view, -1))}><ChevronLeft size={16} /></button
+<div
+	class={[
+		'flex h-9 items-stretch divide-x divide-border overflow-hidden rounded-lg border bg-surface text-sm text-fg transition-colors',
+		open ? 'border-accent ring-2 ring-accent/25' : 'border-border-strong'
+	]}
+	bind:this={root}
+>
+	<button type="button" class={step} aria-label="Earlier" onclick={() => onchange(shift(view, -1))}
+		><ChevronLeft size={16} /></button
 	>
 	<button
 		type="button"
-		class="flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md bg-surface px-2.5 text-sm font-medium whitespace-nowrap shadow-card sm:w-52 sm:flex-none"
+		class="flex min-w-0 flex-1 items-center gap-2 px-2.5 whitespace-nowrap hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none sm:w-52 sm:flex-none"
 		title={viewLabel(view)}
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		onclick={toggle}
-		><Calendar size={14} class="shrink-0 text-muted" /><span class="truncate tabular-nums"
+		><Calendar size={15} class="shrink-0 text-muted" /><span class="truncate tabular-nums"
 			>{viewLabel(view)}</span
 		></button
 	>
 	<button
 		type="button"
-		class={button({ variant: 'ghost', size: 'icon', class: 'size-7 text-muted' })}
+		class={step}
 		aria-label="Later"
 		disabled={atEnd}
 		onclick={() => onchange(shift(view, 1))}><ChevronRight size={16} /></button
 	>
 	<button
 		type="button"
-		class={button({ variant: 'ghost', size: 'icon', class: 'size-7 text-muted' })}
+		class={step}
 		aria-label="Zoom out"
 		title="Zoom out"
 		disabled={view.to - view.from >= MAX_RANGE_S}
