@@ -42,7 +42,8 @@
 		return () => clearInterval(timer);
 	});
 
-	let chosen = $state('');
+	// The picked value, remembered per device.
+	const chosen = $derived(new Stored(`espm.history.value.${id ?? ''}`));
 	// Presets are remembered; a stepped, zoomed or custom range only for this visit.
 	const preset = new Stored('espm.history.range', 'today', isPreset);
 	let view = $state<View>(presetView(preset.value));
@@ -54,7 +55,7 @@
 	const device = $derived(catalog.current?.devices.find((d) => d.id === id));
 	// A value that no longer exists falls back to the first one (not a diagnostic).
 	const series = $derived(
-		device?.series.find((s) => seriesKey(s) === chosen) ??
+		device?.series.find((s) => seriesKey(s) === chosen.value) ??
 			device?.series.find((s) => !isDiagnostic(s)) ??
 			device?.series[0]
 	);
@@ -176,7 +177,7 @@
 	<div class="mb-4 flex flex-wrap items-center gap-2 sm:flex-nowrap">
 		{@render picker?.()}
 		<Select
-			bind:value={() => series && seriesKey(series), (v) => (chosen = v ?? '')}
+			bind:value={() => series && seriesKey(series), (v) => (chosen.value = v ?? '')}
 			groups={seriesGroups}
 			aria-label="Value"
 			class="w-full sm:w-0 sm:max-w-60 sm:flex-1"
