@@ -1,5 +1,6 @@
 <!-- History of a device: value picker, stats that fit the kind of value, and the chart. -->
 <script lang="ts">
+	import Gauge from '@lucide/svelte/icons/gauge';
 	import type { Snippet } from 'svelte';
 	import {
 		Notice,
@@ -9,7 +10,8 @@
 		Stored,
 		api,
 		errorText,
-		formatDuration
+		formatDuration,
+		cardHeader
 	} from '#sdk/device-ui';
 	import Chart from './Chart.svelte';
 	import RangePicker from './RangePicker.svelte';
@@ -24,7 +26,7 @@
 		type Point,
 		type Series
 	} from './sources';
-	import { isPreset, presetView, type View } from './ranges';
+	import { isPreset, presetView, viewLabel, type View } from './ranges';
 
 	let {
 		device: id,
@@ -53,6 +55,8 @@
 	}
 
 	const device = $derived(catalog.current?.devices.find((d) => d.id === id));
+	// The card's header shows the selection and the controls; a dialog names the device itself.
+	const inCard = cardHeader({ title, actions });
 	// A value that no longer exists falls back to the first one (not a diagnostic).
 	const series = $derived(
 		device?.series.find((s) => seriesKey(s) === chosen.value) ??
@@ -60,15 +64,18 @@
 			device?.series[0]
 	);
 
+	// The endpoint only where a value is there twice.
+	const label = $derived.by(() => {
+		const count: Record<string, number> = {};
+		for (const s of device?.series ?? []) count[s.metric] = (count[s.metric] ?? 0) + 1;
+		return (s: Series) => {
+			const ep = /(?:^|,)endpoint=(\d+)/.exec(s.labels)?.[1];
+			return metricLabel(s.metric) + (ep && count[s.metric] > 1 ? ` (endpoint ${ep})` : '');
+		};
+	});
+
 	const seriesGroups = $derived.by(() => {
 		const all = device?.series ?? [];
-		const count: Record<string, number> = {};
-		for (const s of all) count[s.metric] = (count[s.metric] ?? 0) + 1;
-		const label = (s: Series) => {
-			const ep = /(?:^|,)endpoint=(\d+)/.exec(s.labels)?.[1];
-			const twice = count[s.metric] > 1;
-			return metricLabel(s.metric) + (ep && twice ? ` (endpoint ${ep})` : '');
-		};
 		// The current reading as a badge in the list.
 		const option = (s: Series) => ({
 			value: seriesKey(s),
@@ -167,6 +174,38 @@
 	});
 </script>
 
+{#snippet selection()}
+	{@const text = `${series ? label(series) : '–'} · ${viewLabel(view)}`}
+	<span class="block truncate text-xs text-muted" title={text}>{text}</span>
+{/snippet}
+
+<!-- Two rows, cut off where too long. -->
+{#snippet title()}
+	{#if device}
+		<span class="block leading-tight">
+			<span class="block truncate text-sm font-semibold" title={device.name}>{device.name}</span>
+			{@render selection()}
+		</span>
+	{/if}
+{/snippet}
+
+{#snippet actions()}
+	{#if device}
+		<div class="flex shrink-0 items-center gap-1">
+			{@render picker?.()}
+			<Select
+				bind:value={() => series && seriesKey(series), (v) => (chosen.value = v ?? '')}
+				groups={seriesGroups}
+				aria-label="Value"
+				title="Value"
+			>
+				{#snippet icon()}<Gauge size={16} />{/snippet}
+			</Select>
+			<RangePicker {view} onchange={setView} />
+		</div>
+	{/if}
+{/snippet}
+
 {#if catalog.error && !catalog.current}
 	<Notice tone="err">{catalog.error}</Notice>
 {:else if catalog.current === undefined}
@@ -174,24 +213,18 @@
 {:else if !device}
 	<Notice>No values to show yet.</Notice>
 {:else}
-	<div class="mb-4 flex flex-wrap items-center gap-2 sm:flex-nowrap">
-		{@render picker?.()}
-		<Select
-			bind:value={() => series && seriesKey(series), (v) => (chosen.value = v ?? '')}
-			groups={seriesGroups}
-			aria-label="Value"
-			class="w-full sm:w-0 sm:max-w-60 sm:flex-1"
-		/>
-		<div class="w-full sm:ml-auto sm:w-auto sm:shrink-0">
-			<RangePicker {view} onchange={setView} />
+	{#if !inCard}
+		<div class="mb-4 flex items-center gap-2">
+			<div class="min-w-0 flex-1">{@render selection()}</div>
+			{@render actions()}
 		</div>
-	</div>
+	{/if}
 
 	{#if series}
-		<div class="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
-			<Stat label="Now" value={valueText(series, series.value)} />
+		<div class="mb-3 flex flex-wrap gap-x-4 gap-y-2 *:flex-auto *:whitespace-nowrap sm:gap-x-6">
+			<Stat label="Now" value={valueText(series, series.value)} size="sm" />
 			{#each stats as s (s.label)}
-				<Stat label={s.label} value={s.value} />
+				<Stat label={s.label} value={s.value} size="sm" />
 			{/each}
 		</div>
 	{/if}

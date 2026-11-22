@@ -62,6 +62,7 @@
 		size,
 		invalid,
 		mono,
+		icon,
 		class: className,
 		children,
 		...rest
@@ -69,6 +70,8 @@
 		SelectVariants & {
 			/** Shown while nothing (or an unknown value) is picked. */
 			placeholder?: string;
+			/** Just this icon in the field; the selection is shown elsewhere. */
+			icon?: Snippet;
 		} & (
 			{ groups: SelectGroup[]; children?: never } | { groups?: never; children: Snippet }
 		) = $props();
@@ -105,15 +108,37 @@
 	</option>
 {/snippet}
 
-<select bind:value class={select({ size, invalid, mono, class: className as string })} {...rest}>
-	{#if richSelect}
-		<button type="button"
-			><selectedcontent></selectedcontent><ChevronsUpDown
-				size={15}
-				class="ml-auto shrink-0 text-muted"
-			/></button
-		>
-	{/if}
+{#snippet field()}
+	<select
+		bind:value
+		class={select({
+			size,
+			invalid,
+			mono,
+			class: [
+				icon && 'peer w-9 shrink-0 justify-center px-0',
+				icon &&
+					(richSelect
+						? 'text-muted hover:text-fg'
+						: 'appearance-none text-transparent [&_option]:text-fg'),
+				className as string
+			]
+		})}
+		{...rest}
+	>
+		{#if richSelect}
+			<button type="button" class={[icon && 'justify-center']}
+				>{#if icon}{@render icon()}{:else}<selectedcontent></selectedcontent><ChevronsUpDown
+						size={15}
+						class="ml-auto shrink-0 text-muted"
+					/>{/if}</button
+			>
+		{/if}
+		{@render options()}
+	</select>
+{/snippet}
+
+{#snippet options()}
 	{#if placeholder && !known}
 		<!-- Carries the unknown value, so the binding lands here. -->
 		<option {value} disabled data-placeholder>{placeholder}</option>
@@ -133,4 +158,17 @@
 	{:else}
 		{@render children?.()}
 	{/if}
-</select>
+{/snippet}
+
+{#if icon && !richSelect}
+	<!-- The browser's own select can't show an icon: an invisible one over it. -->
+	<span class="relative inline-flex shrink-0">
+		{@render field()}
+		<span
+			class="pointer-events-none absolute inset-0 flex items-center justify-center text-muted peer-hover:text-fg"
+			>{@render icon()}</span
+		>
+	</span>
+{:else}
+	{@render field()}
+{/if}

@@ -7,6 +7,7 @@
 	import Button from './Button.svelte';
 	import type { Snippet } from 'svelte';
 	import { tv } from 'tailwind-variants';
+	import { blockCardHeader } from './card-header.svelte';
 
 	let {
 		open = $bindable(false),
@@ -25,6 +26,8 @@
 		onsubmit?: () => void;
 		onclose?: () => void;
 	} = $props();
+
+	blockCardHeader();
 
 	let el = $state<HTMLDialogElement>();
 

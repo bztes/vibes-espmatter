@@ -41,5 +41,6 @@ export {
 } from './api';
 export { Poll } from './poll.svelte';
 export { Stored } from './stored.svelte';
+export { cardHeader, provideCardHeader } from './card-header.svelte';
 export { session } from './session.svelte';
 export type { SpotStory, Story } from './story';

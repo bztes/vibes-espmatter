@@ -12,7 +12,8 @@
 		value: string | number | undefined;
 		unit?: string;
 		tone?: 'default' | 'ok' | 'warn' | 'err' | 'accent';
-		size?: 'md' | 'lg';
+		/** sm: smaller on phones. */
+		size?: 'sm' | 'md' | 'lg';
 	} = $props();
 
 	const stat = tv({
@@ -30,7 +31,11 @@
 				err: { num: 'text-err' },
 				accent: { num: 'text-accent' }
 			},
-			size: { md: { num: 'text-xl' }, lg: { num: 'text-4xl', suffix: 'text-xl' } }
+			size: {
+				sm: { num: 'text-base sm:text-xl' },
+				md: { num: 'text-xl' },
+				lg: { num: 'text-4xl', suffix: 'text-xl' }
+			}
 		}
 	});
 	const s = $derived(stat({ tone, size }));

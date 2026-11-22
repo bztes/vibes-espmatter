@@ -1,5 +1,6 @@
 <!-- The history page: pick a device, a value and a time range – one toolbar above the chart. -->
 <script lang="ts">
+	import Cpu from '@lucide/svelte/icons/cpu';
 	import { Select, Stored } from '#sdk/device-ui';
 	import HistoryView from './HistoryView.svelte';
 	import { catalog, loadCatalog } from './catalog.svelte';
@@ -38,7 +39,9 @@
 			bind:value={() => device?.id, (v) => (chosen.value = v ?? '')}
 			{groups}
 			aria-label="Device"
-			class="w-full sm:w-0 sm:max-w-60 sm:flex-1"
-		/>
+			title="Device"
+		>
+			{#snippet icon()}<Cpu size={16} />{/snippet}
+		</Select>
 	{/snippet}
 </HistoryView>
