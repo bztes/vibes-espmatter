@@ -1,5 +1,23 @@
 # vibes-espmatter
 
+## 0.5.1
+
+### Patch Changes
+
+- [`e2a569e`](https://github.com/bztes/vibes-espmatter/commit/e2a569ecee8808b73472fbd2eaa97ebf88f10181) Thanks [@bztes](https://github.com/bztes)! - Buttons, fields, selects and segmented controls share the same heights.
+
+- [`8bd0613`](https://github.com/bztes/vibes-espmatter/commit/8bd061339be1835d1381a6c6f682a0412dc86595) Thanks [@bztes](https://github.com/bztes)! - Fix the arm64 docker build running on the target platform.
+
+- [`839e282`](https://github.com/bztes/vibes-espmatter/commit/839e28294b390ccbb16cdbd1781a270c092e077b) Thanks [@bztes](https://github.com/bztes)! - The history card's header shows the device, value and time range, with the controls as icons.
+
+- [`02c3558`](https://github.com/bztes/vibes-espmatter/commit/02c35588d2f0b6ca91c35a21ffbb155498ee86b1) Thanks [@bztes](https://github.com/bztes)! - History remembers the picked value per device.
+
+- [`8867199`](https://github.com/bztes/vibes-espmatter/commit/8867199914b78d80dc68ddc85318e96bbe040b0f) Thanks [@bztes](https://github.com/bztes)! - README setup uses the Docker image, development moved to CONTRIBUTING.
+
+- [`4fb0a89`](https://github.com/bztes/vibes-espmatter/commit/4fb0a897566b79f4622d769fe7cd62cf6dac7e41) Thanks [@bztes](https://github.com/bztes)! - Docker image is published to GHCR.
+
+- [`3c12abc`](https://github.com/bztes/vibes-espmatter/commit/3c12abcb8c96774289a8d2073fbe8e899bb0f20e) Thanks [@bztes](https://github.com/bztes)! - Scenes show as cards on the dashboard and are managed on the automations page.
+
 ## 0.5.0
 
 ### Minor Changes
