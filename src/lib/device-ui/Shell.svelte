@@ -1,6 +1,6 @@
 <!--
-  The device web interface: login, pages (hash routing) and the widget grid. The header links the
-  pages (on phones the user menu does); the user menu has those marked `menu` (the admin page), the own password, logging out. `#/` is the dashboard (the page with
+  The device web interface: login, pages (hash routing) and the widget grid. The header's page
+  title opens the page list (those marked `menu`, the admin page, last); the user menu has the own password, logging out. `#/` is the dashboard (the page with
   path `/`); a page whose widgets have several tabs shows a tab bar (`#/admin/<tab>`); a `?query` is for the page (`route.query`). Hub accounts
   change their own password here; with a generated one (new account, reset) they must first.
 -->
@@ -52,6 +52,8 @@
 	const navPages = $derived(shown.filter((p) => !p.menu));
 	const menuPages = $derived(shown.filter((p) => p.menu));
 	const current = $derived(shown.find((p) => onPage(p.path)) ?? home);
+	/** The page title in the header, once there are pages to tell apart. */
+	const showTitle = $derived(authed && !changing && shown.length > 1 && !!current);
 	const onCurrent = $derived(allowed.filter((w) => w.page === current?.id));
 
 	const slug = (tab: string) => tab.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -65,6 +67,8 @@
 
 	let menuOpen = $state(false);
 	let menu = $state<HTMLElement>();
+	let pagesOpen = $state(false);
+	let pagesMenu = $state<HTMLElement>();
 
 	interface Identity {
 		user?: string;
@@ -157,6 +161,7 @@
 
 	function closeMenuOutside(e: MouseEvent) {
 		if (menuOpen && menu && !menu.contains(e.target as Node)) menuOpen = false;
+		if (pagesOpen && pagesMenu && !pagesMenu.contains(e.target as Node)) pagesOpen = false;
 	}
 
 	function logout() {
@@ -169,34 +174,27 @@
 	}
 </script>
 
-<!-- A page link of the header, or (`inMenu`) of the user menu. -->
-{#snippet pageLink(page: ShellPage, inMenu: boolean)}
+<!-- A page link of the page list. -->
+{#snippet pageLink(page: ShellPage)}
 	{@const here = page === current}
 	<a
-		role={inMenu ? 'menuitem' : undefined}
+		role="menuitem"
 		href="#{page.path}"
 		aria-current={here ? 'page' : undefined}
 		class={[
-			'flex items-center text-sm no-underline',
-			inMenu
-				? 'gap-2 rounded-md px-2.5 py-2'
-				: 'h-9 gap-1.5 rounded-lg px-2.5 font-medium whitespace-nowrap',
-			here
-				? 'bg-accent-soft text-accent'
-				: inMenu
-					? 'text-fg hover:bg-surface-2'
-					: 'text-muted hover:bg-surface-2 hover:text-fg'
+			'flex items-center gap-2 rounded-md px-2.5 py-2 text-sm no-underline',
+			here ? 'bg-accent-soft text-accent' : 'text-fg hover:bg-surface-2'
 		]}
-		onclick={inMenu ? () => (menuOpen = false) : undefined}
+		onclick={() => (pagesOpen = false)}
 	>
-		{#if page.icon}<page.icon size={16} class={inMenu && !here ? 'text-muted' : ''} />{/if}
+		{#if page.icon}<page.icon size={16} class={here ? '' : 'text-muted'} />{/if}
 		{page.title}
 	</a>
 {/snippet}
 
 <svelte:window
 	onclick={closeMenuOutside}
-	onkeydown={(e) => e.key === 'Escape' && (menuOpen = false)}
+	onkeydown={(e) => e.key === 'Escape' && ((menuOpen = false), (pagesOpen = false))}
 />
 
 <div class="min-h-screen bg-bg font-sans text-fg antialiased">
@@ -207,12 +205,39 @@
 					class="grid size-7 place-items-center rounded-lg bg-accent text-sm font-bold text-accent-fg"
 					>{name.slice(0, 1).toUpperCase()}</span
 				>
-				<span class="truncate font-semibold">{name}</span>
+				<span class={['truncate font-semibold', showTitle && 'max-sm:hidden']}>{name}</span>
 			</a>
-			{#if authed && !changing && navPages.length > 1}
-				<nav class="flex min-w-0 gap-0.5 overflow-x-auto max-sm:hidden" aria-label="Pages">
-					{#each navPages as page (page.id)}{@render pageLink(page, false)}{/each}
-				</nav>
+			{#if showTitle}
+				<span class="text-muted max-sm:hidden" aria-hidden="true">/</span>
+				<div class="relative -ml-2.5 min-w-0" bind:this={pagesMenu}>
+					<h1 class="m-0 text-base">
+						<button
+							type="button"
+							class={[
+								'flex h-9 max-w-full items-center gap-1.5 rounded-lg px-2.5 font-semibold text-fg hover:bg-surface-2',
+								pagesOpen && 'bg-surface-2'
+							]}
+							aria-haspopup="menu"
+							aria-expanded={pagesOpen}
+							onclick={() => (pagesOpen = !pagesOpen)}
+						>
+							<span class="truncate">{current?.title}</span>
+							<ChevronDown size={14} class="shrink-0 text-muted" />
+						</button>
+					</h1>
+					{#if pagesOpen}
+						<div
+							role="menu"
+							class="absolute left-0 mt-1 grid w-56 gap-0.5 rounded-lg border border-border bg-surface p-1 shadow-card"
+						>
+							{#each navPages as page (page.id)}{@render pageLink(page)}{/each}
+							{#if navPages.length && menuPages.length}
+								<div class="my-0.5 border-t border-border"></div>
+							{/if}
+							{#each menuPages as page (page.id)}{@render pageLink(page)}{/each}
+						</div>
+					{/if}
+				</div>
 			{/if}
 			{#if authed}
 				<div class="relative ml-auto" bind:this={menu}>
@@ -240,15 +265,6 @@
 								{#if accounts}· {session.admin ? 'admin' : 'user'}{/if}
 							</div>
 							{#if !changing}
-								{#if navPages.length > 1}
-									<!-- On phones the header has no room for the pages: they move in here. -->
-									<div class="grid gap-0.5 border-b border-border pb-1 sm:hidden">
-										{#each navPages as page (page.id)}{@render pageLink(page, true)}{/each}
-									</div>
-								{/if}
-								{#each menuPages.filter((p) => p !== current) as page (page.id)}
-									{@render pageLink(page, true)}
-								{/each}
 								{#if ownPassword}
 									<button
 										type="button"
@@ -361,10 +377,6 @@
 		{:else if authed}
 			{#if pwDone}
 				<div class="mb-4"><Notice tone="ok">Your password is changed.</Notice></div>
-			{/if}
-			<!-- The dashboard needs no headline: the header already names the hub. -->
-			{#if current?.path !== '/'}
-				<h1 class="mt-0 mb-4 text-xl font-semibold">{current?.title}</h1>
 			{/if}
 			{#if tabs.length > 1}
 				<nav

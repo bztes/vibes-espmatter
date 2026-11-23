@@ -4,7 +4,7 @@ export interface ShellPage {
 	id: string;
 	title: string;
 	path: string;
-	/** Linked in the user menu instead of the header. */
+	/** Listed last in the page list, below the other pages. */
 	menu?: boolean;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	icon?: Component<any>;
