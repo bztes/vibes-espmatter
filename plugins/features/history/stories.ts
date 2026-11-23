@@ -134,7 +134,7 @@ export const spotStories: SpotStory[] = [
 ];
 
 export default [
-	{ name: 'History', component: HistoryPage, page: 'history', wide: true, api }
+	{ name: 'History', component: HistoryPage, page: 'history', wide: true, plain: true, api }
 ] satisfies Story[];
 
 /** What the history page shows of a device. */
@@ -144,6 +144,7 @@ export const parts = [
 		component: HistoryView,
 		props: { device: 'a1b2c3d4/node-18' },
 		wide: true,
+		plain: true,
 		api
 	},
 	{
@@ -151,6 +152,7 @@ export const parts = [
 		component: HistoryView,
 		props: { device: 'a1b2c3d4/node-19' },
 		wide: true,
+		plain: true,
 		api
 	},
 	{
@@ -158,6 +160,7 @@ export const parts = [
 		component: HistoryView,
 		props: { device: 'a1b2c3d4' },
 		wide: true,
+		plain: true,
 		api
 	},
 	{
@@ -165,6 +168,7 @@ export const parts = [
 		component: HistoryView,
 		props: { device: 'a1b2c3d4/node-18' },
 		wide: true,
+		plain: true,
 		api: { ...api, '/api/v1/history': { meta: [], data: [], rows: 0 } }
 	}
 ] satisfies Story[];

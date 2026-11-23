@@ -101,7 +101,11 @@
 				<div class="mb-4 font-mono text-xs text-muted">{key}</div>
 				{#key key}
 					<div class={story.wide ? 'max-w-3xl' : 'max-w-sm'}>
-						<Card title={story.name} wide={story.wide}><story.component {...story.props} /></Card>
+						{#if story.plain}
+							<story.component {...story.props} />
+						{:else}
+							<Card title={story.name} wide={story.wide}><story.component {...story.props} /></Card>
+						{/if}
 					</div>
 				{/key}
 				{#if story.api}

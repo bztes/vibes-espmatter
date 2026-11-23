@@ -1,4 +1,4 @@
-<!-- History of a device: value picker, stats that fit the kind of value, and the chart. -->
+<!-- History of a device: header with the controls, stats that fit the kind of value, and the chart. -->
 <script lang="ts">
 	import Gauge from '@lucide/svelte/icons/gauge';
 	import type { Snippet } from 'svelte';
@@ -10,8 +10,7 @@
 		Stored,
 		api,
 		errorText,
-		formatDuration,
-		cardHeader
+		formatDuration
 	} from '#sdk/device-ui';
 	import Chart from './Chart.svelte';
 	import RangePicker from './RangePicker.svelte';
@@ -55,8 +54,6 @@
 	}
 
 	const device = $derived(catalog.current?.devices.find((d) => d.id === id));
-	// The card's header shows the device, the selection and the controls.
-	cardHeader({ title, actions });
 	// A value that no longer exists falls back to the first one (not a diagnostic).
 	const series = $derived(
 		device?.series.find((s) => seriesKey(s) === chosen.value) ??
@@ -179,18 +176,19 @@
 	<span class="block truncate text-xs text-muted" title={text}>{text}</span>
 {/snippet}
 
-<!-- Two rows, cut off where too long. -->
-{#snippet title()}
-	{#if device}
-		<span class="block leading-tight">
-			<span class="block truncate text-sm font-semibold" title={device.name}>{device.name}</span>
+{#if catalog.error && !catalog.current}
+	<Notice tone="err">{catalog.error}</Notice>
+{:else if catalog.current === undefined}
+	<div class="flex justify-center py-10"><Spinner /></div>
+{:else if !device}
+	<Notice>No values to show yet.</Notice>
+{:else}
+	<div class="mb-4 flex items-center gap-2">
+		<!-- Two rows, cut off where too long. -->
+		<div class="min-w-0 flex-1 leading-tight">
+			<span class="block truncate font-semibold" title={device.name}>{device.name}</span>
 			{@render selection()}
-		</span>
-	{/if}
-{/snippet}
-
-{#snippet actions()}
-	{#if device}
+		</div>
 		<div class="flex shrink-0 items-center gap-1">
 			{@render picker?.()}
 			<Select
@@ -203,43 +201,37 @@
 			</Select>
 			<RangePicker {view} onchange={setView} />
 		</div>
-	{/if}
-{/snippet}
+	</div>
 
-{#if catalog.error && !catalog.current}
-	<Notice tone="err">{catalog.error}</Notice>
-{:else if catalog.current === undefined}
-	<div class="flex justify-center py-10"><Spinner /></div>
-{:else if !device}
-	<Notice>No values to show yet.</Notice>
-{:else}
-	{#if series}
-		<div class="mb-3 flex flex-wrap gap-x-4 gap-y-2 *:flex-auto *:whitespace-nowrap sm:gap-x-6">
-			<Stat label="Now" value={valueText(series, series.value)} size="sm" />
-			{#each stats as s (s.label)}
-				<Stat label={s.label} value={s.value} size="sm" />
-			{/each}
-		</div>
-	{/if}
+	<section class="min-w-0 rounded-card border border-border bg-surface p-4 shadow-card">
+		{#if series}
+			<div class="mb-3 flex flex-wrap gap-x-4 gap-y-2 *:flex-auto *:whitespace-nowrap sm:gap-x-6">
+				<Stat label="Now" value={valueText(series, series.value)} size="sm" />
+				{#each stats as s (s.label)}
+					<Stat label={s.label} value={s.value} size="sm" />
+				{/each}
+			</div>
+		{/if}
 
-	{#if error}
-		<Notice tone="err">{error}</Notice>
-	{:else if loading && !points.length}
-		<div class="flex h-60 items-center justify-center"><Spinner /></div>
-	{:else if !points.length}
-		<Notice>
-			No values in this time range. Check that the collector writes to this database and that the
-			device is exported.
-		</Notice>
-	{:else if series}
-		<div class={['transition-opacity', loading && 'opacity-50']}>
-			<Chart
-				{points}
-				{series}
-				from={shown.from}
-				to={shown.to}
-				onzoom={(from, to) => setView({ from, to })}
-			/>
-		</div>
-	{/if}
+		{#if error}
+			<Notice tone="err">{error}</Notice>
+		{:else if loading && !points.length}
+			<div class="flex h-60 items-center justify-center"><Spinner /></div>
+		{:else if !points.length}
+			<Notice>
+				No values in this time range. Check that the collector writes to this database and that the
+				device is exported.
+			</Notice>
+		{:else if series}
+			<div class={['transition-opacity', loading && 'opacity-50']}>
+				<Chart
+					{points}
+					{series}
+					from={shown.from}
+					to={shown.to}
+					onzoom={(from, to) => setView({ from, to })}
+				/>
+			</div>
+		{/if}
+	</section>
 {/if}

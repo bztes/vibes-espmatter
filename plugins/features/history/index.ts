@@ -147,6 +147,7 @@ export default defineFeature({
 			file: 'HistoryPage.svelte',
 			title: 'History',
 			wide: true,
+			plain: true,
 			order: 1,
 			access: 'account'
 		});
