@@ -1,5 +1,21 @@
 # vibes-espmatter
 
+## 0.6.0
+
+### Minor Changes
+
+- [`27f3d7f`](https://github.com/bztes/vibes-espmatter/commit/27f3d7f1eb81d9de9bf782731be6224791e83aac) Thanks [@bztes](https://github.com/bztes)! - Add a Docker health check
+
+### Patch Changes
+
+- [`aeb33e5`](https://github.com/bztes/vibes-espmatter/commit/aeb33e5bfd1401e46dd247580237e9ea90460d75) Thanks [@bztes](https://github.com/bztes)! - Automations show when they last ran.
+
+- [`9e80364`](https://github.com/bztes/vibes-espmatter/commit/9e80364c8b749658a45e3caa57c1da21f4e5bc12) Thanks [@bztes](https://github.com/bztes)! - Device web interface header shows the page title, which opens the page list.
+
+- [`b0c8102`](https://github.com/bztes/vibes-espmatter/commit/b0c8102b24fe12a80f0deafb387f8c9fa776f1b7) Thanks [@bztes](https://github.com/bztes)! - The chart icon on a device card opens the history page for that device.
+
+- [`54606c6`](https://github.com/bztes/vibes-espmatter/commit/54606c6cd528b2236bffe605addb911fbd8e074c) Thanks [@bztes](https://github.com/bztes)! - The history page shows its header on the page and the stats with the chart in a card.
+
 ## 0.5.1
 
 ### Patch Changes
