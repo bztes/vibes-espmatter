@@ -137,7 +137,7 @@ export default [
 	{ name: 'History', component: HistoryPage, page: 'history', wide: true, api }
 ] satisfies Story[];
 
-/** What the chart dialog shows. */
+/** What the history page shows of a device. */
 export const parts = [
 	{
 		name: 'Temperature',

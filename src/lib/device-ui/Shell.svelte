@@ -1,7 +1,7 @@
 <!--
   The device web interface: login, pages (hash routing) and the widget grid. The header links the
   pages (on phones the user menu does); the user menu has those marked `menu` (the admin page), the own password, logging out. `#/` is the dashboard (the page with
-  path `/`); a page whose widgets have several tabs shows a tab bar (`#/admin/<tab>`). Hub accounts
+  path `/`); a page whose widgets have several tabs shows a tab bar (`#/admin/<tab>`); a `?query` is for the page (`route.query`). Hub accounts
   change their own password here; with a generated one (new account, reset) they must first.
 -->
 <script lang="ts">
@@ -16,6 +16,7 @@
 		errorText,
 		getToken,
 		onUnauthorized,
+		route as hashRoute,
 		session,
 		setToken
 	} from '#sdk/device-ui';
@@ -38,14 +39,12 @@
 	let pwBusy = $state(false);
 	/** Just logged in with the generated password: it is the current one, no need to ask again. */
 	let currentKnown = $state(false);
-	let hash = $state('');
 
 	/** Hubs have accounts: admins, and users who see only what they have grants for. */
 	const accounts = $derived(device.kind === 'hub');
 	const allowed = $derived(widgets.filter((w) => session.admin || w.access === 'account'));
 	const shown = $derived(pages.filter((p) => allowed.some((w) => w.page === p.id)));
-	/** The path after `#`, `/` for none. */
-	const route = $derived(hash.replace(/^#/, '') || '/');
+	const route = $derived(hashRoute.path);
 	const onPage = (path: string) =>
 		path === '/' ? route === '/' : route === path || route.startsWith(path + '/');
 	/** The dashboard (`/`) is home; without one (a device, or no dashboard), the first page. */
@@ -116,9 +115,6 @@
 	}
 
 	onMount(() => {
-		hash = location.hash;
-		const onHash = () => (hash = location.hash);
-		addEventListener('hashchange', onHash);
 		onUnauthorized(() => (authed = false));
 		if (!preview) {
 			fetch('/api/v1/info')
@@ -137,7 +133,6 @@
 					() => (authed = false)
 				);
 		}
-		return () => removeEventListener('hashchange', onHash);
 	});
 
 	async function login(e: SubmitEvent) {

@@ -55,8 +55,8 @@
 	}
 
 	const device = $derived(catalog.current?.devices.find((d) => d.id === id));
-	// The card's header shows the selection and the controls; a dialog names the device itself.
-	const inCard = cardHeader({ title, actions });
+	// The card's header shows the device, the selection and the controls.
+	cardHeader({ title, actions });
 	// A value that no longer exists falls back to the first one (not a diagnostic).
 	const series = $derived(
 		device?.series.find((s) => seriesKey(s) === chosen.value) ??
@@ -213,13 +213,6 @@
 {:else if !device}
 	<Notice>No values to show yet.</Notice>
 {:else}
-	{#if !inCard}
-		<div class="mb-4 flex items-center gap-2">
-			<div class="min-w-0 flex-1">{@render selection()}</div>
-			{@render actions()}
-		</div>
-	{/if}
-
 	{#if series}
 		<div class="mb-3 flex flex-wrap gap-x-4 gap-y-2 *:flex-auto *:whitespace-nowrap sm:gap-x-6">
 			<Stat label="Now" value={valueText(series, series.value)} size="sm" />

@@ -1,13 +1,20 @@
 <!-- The history page: pick a device, a value and a time range – one toolbar above the chart. -->
 <script lang="ts">
 	import Cpu from '@lucide/svelte/icons/cpu';
-	import { Select, Stored } from '#sdk/device-ui';
+	import { Select, Stored, route } from '#sdk/device-ui';
 	import HistoryView from './HistoryView.svelte';
 	import { catalog, loadCatalog } from './catalog.svelte';
 
 	$effect(() => void loadCatalog());
 
 	const chosen = new Stored('espm.history.device');
+
+	// `#/history?device=<id>` (a card's chart icon) picks the device.
+	const linked = route.query.get('device');
+	if (linked) {
+		chosen.value = linked;
+		route.clearQuery();
+	}
 
 	// This device first, then the paired ones by name.
 	const devices = $derived(
