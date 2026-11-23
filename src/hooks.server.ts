@@ -19,7 +19,8 @@ const PUBLIC = [
 	/^\/api\/v1\//,
 	/^\/_app\//,
 	/^\/favicon/,
-	/^\/robots\.txt$/
+	/^\/robots\.txt$/,
+	/^\/health$/
 ];
 
 /** Where someone who must change their generated password may still go. */
