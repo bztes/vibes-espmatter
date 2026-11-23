@@ -96,6 +96,8 @@ struct Rule {
     std::vector<Action> actions; // only what's used
     uint8_t vstate;
     int64_t vsince; // V_PENDING: s (esp_timer) the condition holds since
+    int64_t last_run; // Unix time, 0: never (or before the clock was set)
+    bool last_unsaved; // saved with the next minute, not per run
 };
 
 struct Named {
@@ -452,7 +454,8 @@ static const char *parse_actions(cJSON *list, Rule &r, bool strict)
 // Persistence: one document per rule
 // ---------------------------------------------------------------------------------------------
 
-static void key_of(uint16_t id, char *key) { snprintf(key, 8, "r%u", id); }
+/** `r`: the rule, `l`: its last run (apart: a run doesn't rewrite the JSON). */
+static void key_of(uint16_t id, char *key, char kind = 'r') { snprintf(key, 8, "%c%u", kind, id); }
 
 static bool save(const Rule &r)
 {
@@ -480,6 +483,8 @@ static void erase(uint16_t id)
     key_of(id, key);
     nvs_handle_t h;
     if (nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_erase_key(h, key);
+    key_of(id, key, 'l');
     nvs_erase_key(h, key);
     nvs_commit(h);
     nvs_close(h);
@@ -517,9 +522,12 @@ static void load()
             if (nvs_get_str(h, info.key, nullptr, &len) == ESP_OK && len) {
                 std::vector<char> text(len);
                 Rule r;
-                if (nvs_get_str(h, info.key, text.data(), &len) == ESP_OK && parse_rule(text.data(), r))
+                if (nvs_get_str(h, info.key, text.data(), &len) == ESP_OK && parse_rule(text.data(), r)) {
+                    char key[8];
+                    key_of(r.id, key, 'l');
+                    nvs_get_i64(h, key, &r.last_run);
                     s_rules.push_back(r);
-                else ESP_LOGW(TAG, "Skipping unreadable rule %s", info.key);
+                } else ESP_LOGW(TAG, "Skipping unreadable rule %s", info.key);
             }
             res = nvs_entry_next(&it);
         }
@@ -622,9 +630,13 @@ static void run_request(const Action &a)
 }
 
 /** The actions the owner may still run. */
-static void run(const Rule &r, bool release = false)
+static void run(Rule &r, bool release = false)
 {
     if (!owner_exists(r.owner)) return;
+    if (!release && espm_time_valid()) {
+        r.last_run = time(nullptr);
+        r.last_unsaved = true;
+    }
     for (size_t i = 0; i < r.actions.size(); i++) {
         const Action &a = r.actions[i];
         if (const char *p = action_problem(r.owner, a)) {
@@ -644,7 +656,7 @@ static void run(const Rule &r, bool release = false)
 
 void espm_automations_button(uint64_t node, uint16_t ep, espm_button_t button, bool release)
 {
-    for (const Rule &r : s_rules) {
+    for (Rule &r : s_rules) {
         const Trigger &t = r.trigger;
         if (!r.enabled || t.type != T_BUTTON || t.node != node || t.ep != ep || t.gesture != button) continue;
         if (!espm_auto_allowed(r.owner, node, ep, ESPM_PERM_READ)) continue;
@@ -710,6 +722,24 @@ static void check_values()
     }
 }
 
+/** All unsaved last runs in one commit. */
+static void save_last_runs()
+{
+    nvs_handle_t h;
+    bool open = false;
+    for (Rule &r : s_rules) {
+        if (!r.last_unsaved) continue;
+        if (!open && !(open = nvs_open(NS, NVS_READWRITE, &h) == ESP_OK)) return;
+        char key[8];
+        key_of(r.id, key, 'l');
+        nvs_set_i64(h, key, r.last_run);
+        r.last_unsaved = false;
+    }
+    if (!open) return;
+    nvs_commit(h);
+    nvs_close(h);
+}
+
 /** Last minute handled (Unix time / 60), 0: none yet. */
 static int64_t s_last_minute;
 
@@ -743,7 +773,10 @@ static void time_tick(chip::System::Layer *, void *)
         int64_t now = time(nullptr) / 60;
         // After boot or a clock jump: from now on – times missed meanwhile are skipped, not run late.
         if (!s_last_minute || now < s_last_minute || now - s_last_minute > 5) s_last_minute = now - 1;
-        while (s_last_minute < now) run_minute(++s_last_minute);
+        if (s_last_minute < now) {
+            while (s_last_minute < now) run_minute(++s_last_minute);
+            save_last_runs();
+        }
     }
     chip::DeviceLayer::SystemLayer().StartTimer(chip::System::Clock::Seconds32(5), time_tick, nullptr);
 }
@@ -825,6 +858,7 @@ static esp_err_t list(httpd_req_t *req)
             const char *p = problem(r);
             cJSON_AddBoolToObject(o, "active", r.enabled && !p);
             if (p) cJSON_AddStringToObject(o, "problem", p);
+            if (r.last_run) cJSON_AddNumberToObject(o, "lastRun", (double)r.last_run);
             cJSON_AddItemToArray(rules, o);
         }
     });

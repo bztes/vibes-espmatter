@@ -7,6 +7,8 @@ import ScenesBar from './ui/ScenesBar.svelte';
 import ScenesWidget from './ui/ScenesWidget.svelte';
 
 const ok = { ok: true };
+/** The hub's clock in the automation stories. */
+const STORY_NOW = 1793950320;
 
 const AUTOMATION_NODES = [
 	{
@@ -422,7 +424,7 @@ export default [
 		api: {
 			'POST /api/v1/controller/automations': { ok: true, id: 4 },
 			'/api/v1/controller/automations': {
-				clock: { synced: true, minute: 452, weekday: 5, zone: 'CET', now: 1793950320 },
+				clock: { synced: true, minute: 452, weekday: 5, zone: 'CET', now: STORY_NOW },
 				max: 32,
 				rules: [
 					{
@@ -432,11 +434,12 @@ export default [
 						owner: 'admin',
 						mine: true,
 						active: true,
-						trigger: { type: 'once', at: 1793950320 + 8 * 60 },
+						trigger: { type: 'once', at: STORY_NOW + 8 * 60 },
 						actions: [{ type: 'endpoint', node: 19, endpoint: 1, command: 'off' }]
 					},
 					{
 						id: 1,
+						lastRun: STORY_NOW - 5 * 60,
 						name: '',
 						enabled: true,
 						owner: 'admin',
@@ -447,6 +450,7 @@ export default [
 					},
 					{
 						id: 2,
+						lastRun: STORY_NOW - 32 * 60,
 						name: 'Morning',
 						enabled: true,
 						owner: 'admin',
@@ -457,6 +461,7 @@ export default [
 					},
 					{
 						id: 3,
+						lastRun: STORY_NOW - 3 * 86400,
 						name: 'Night light',
 						enabled: false,
 						owner: 'admin',
@@ -467,6 +472,7 @@ export default [
 					},
 					{
 						id: 4,
+						lastRun: STORY_NOW - 2 * 86400,
 						name: '',
 						enabled: true,
 						owner: 'anna',
@@ -478,6 +484,7 @@ export default [
 					},
 					{
 						id: 6,
+						lastRun: STORY_NOW - 4 * 3600,
 						name: 'Airing',
 						enabled: true,
 						owner: 'admin',

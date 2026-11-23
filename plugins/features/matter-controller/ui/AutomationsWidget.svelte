@@ -21,6 +21,7 @@
 	import { sensors } from './watches';
 	import {
 		WEEKDAYS,
+		agoText,
 		controllables,
 		endpointsWith,
 		timeText,
@@ -208,6 +209,11 @@
 								{#if failing(rule)}
 									<span class="text-xs text-warn">Not running: {rule.problem}</span>
 								{/if}
+								<span class="text-xs text-muted">
+									Last run: {rule.lastRun
+										? agoText(rule.lastRun, rules.current?.clock.now)
+										: 'never'}
+								</span>
 							</div>
 							{#if !rule.mine}<Badge>{rule.owner}</Badge>{/if}
 							<Button size="sm" variant="ghost" disabled={busy} onclick={() => (dialog = { rule })}

@@ -1,7 +1,7 @@
 /** Automations and scenes of the hub (`/api/v1/controller/automations`, `/api/v1/controller/scenes`). */
 import { ACTIONS, actionsFor, type ActionDef, type ActionId, type Op } from './actions';
 import type { SelectGroup } from '#sdk/device-ui';
-import { CLUSTER, hasCluster, typeName, type Endpoint, type Node } from './matter';
+import { CLUSTER, ago, hasCluster, typeName, type Endpoint, type Node } from './matter';
 
 export type Gesture = 'press' | 'double' | 'hold';
 
@@ -87,6 +87,8 @@ export interface Rule {
 	problem?: string;
 	trigger: Trigger;
 	actions: Action[];
+	/** Unix time, missing: never ran since the hub's clock was set. */
+	lastRun?: number;
 }
 
 export interface Clock {
@@ -227,6 +229,10 @@ export function inText(seconds: number) {
 	const h = Math.floor(min / 60);
 	return `in ${h} h${min % 60 ? ` ${min % 60} min` : ''}`;
 }
+
+/** `ago` within a day, else when. */
+export const agoText = (at: number, now = Date.now() / 1000) =>
+	now - at < 86400 ? ago(now - at) : onceText(at, now);
 
 /** Local date (for `<input type="date">`) and minute of the day. */
 export function localParts(at: number) {
