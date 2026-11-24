@@ -1,8 +1,8 @@
 // A value on a card with a history opens its chart in a popup.
 import type { ValueTarget } from '#sdk/device-ui';
-import ValueHistory from './ValueHistory.svelte';
 import { catalog, loadCatalog } from './catalog.svelte';
 import { seriesKey } from './sources';
+import { valuePopup } from './value-popup';
 
 const target: ValueTarget = (ref) => {
 	// Loaded once on first use; the history page keeps it fresh.
@@ -14,11 +14,7 @@ const target: ValueTarget = (ref) => {
 	if (!device?.series.some((s) => seriesKey(s) === value)) return;
 	return {
 		title: `History of ${ref.label}`,
-		popup: {
-			title: `${device.name} · ${ref.label}`,
-			component: ValueHistory,
-			props: { device: device.id, value, pageLink: true }
-		}
+		popup: valuePopup(device.name, ref.label, { device: device.id, value, pageLink: true })
 	};
 };
 

@@ -13,6 +13,10 @@ export { default as Notice } from './Notice.svelte';
 export { default as Segmented } from './Segmented.svelte';
 export { default as Dialog } from './Dialog.svelte';
 export { default as Popover } from './Popover.svelte';
+export { default as PopupHost } from './PopupHost.svelte';
+export { openPopup, type Popup } from './popup.svelte';
+export { default as TitleMenu } from './TitleMenu.svelte';
+export { default as MenuItem } from './MenuItem.svelte';
 export { default as Input, input } from './Input.svelte';
 export { default as Select, select, type SelectGroup, type SelectOption } from './Select.svelte';
 export { default as Checkbox } from './Checkbox.svelte';
@@ -35,8 +39,7 @@ export {
 	type ValueRef,
 	type ValueSeries,
 	type ValueTarget,
-	type ValueLinkTarget,
-	type ValuePopup
+	type ValueLinkTarget
 } from './values.svelte';
 export {
 	api,

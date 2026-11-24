@@ -1,5 +1,5 @@
 <!--
-  The device web interface: login, pages (hash routing) and the widget grid. The header's page
+  The device web interface: login, pages (hash routing), the widget grid and the popup host. The header's page
   title opens the page list (those marked `menu`, the admin page, last); the user menu has the own password, logging out. `#/` is the dashboard (the page with
   path `/`); a page whose widgets have several tabs shows a tab bar (`#/admin/<tab>`); a `?query` is for the page (`route.query`). Hub accounts
   change their own password here; with a generated one (new account, reset) they must first.
@@ -11,7 +11,10 @@
 	import { onMount, untrack } from 'svelte';
 	import {
 		Button,
+		MenuItem,
 		Notice,
+		PopupHost,
+		TitleMenu,
 		api,
 		errorText,
 		getToken,
@@ -67,8 +70,6 @@
 
 	let menuOpen = $state(false);
 	let menu = $state<HTMLElement>();
-	let pagesOpen = $state(false);
-	let pagesMenu = $state<HTMLElement>();
 
 	interface Identity {
 		user?: string;
@@ -161,7 +162,6 @@
 
 	function closeMenuOutside(e: MouseEvent) {
 		if (menuOpen && menu && !menu.contains(e.target as Node)) menuOpen = false;
-		if (pagesOpen && pagesMenu && !pagesMenu.contains(e.target as Node)) pagesOpen = false;
 	}
 
 	function logout() {
@@ -177,24 +177,15 @@
 <!-- A page link of the page list. -->
 {#snippet pageLink(page: ShellPage)}
 	{@const here = page === current}
-	<a
-		role="menuitem"
-		href="#{page.path}"
-		aria-current={here ? 'page' : undefined}
-		class={[
-			'flex items-center gap-2 rounded-md px-2.5 py-2 text-sm no-underline',
-			here ? 'bg-accent-soft text-accent' : 'text-fg hover:bg-surface-2'
-		]}
-		onclick={() => (pagesOpen = false)}
-	>
+	<MenuItem href="#{page.path}" current={here}>
 		{#if page.icon}<page.icon size={16} class={here ? '' : 'text-muted'} />{/if}
 		{page.title}
-	</a>
+	</MenuItem>
 {/snippet}
 
 <svelte:window
 	onclick={closeMenuOutside}
-	onkeydown={(e) => e.key === 'Escape' && ((menuOpen = false), (pagesOpen = false))}
+	onkeydown={(e) => e.key === 'Escape' && (menuOpen = false)}
 />
 
 <div class="min-h-screen bg-bg font-sans text-fg antialiased">
@@ -209,35 +200,15 @@
 			</a>
 			{#if showTitle}
 				<span class="text-muted max-sm:hidden" aria-hidden="true">/</span>
-				<div class="relative -ml-2.5 min-w-0" bind:this={pagesMenu}>
-					<h1 class="m-0 text-base">
-						<button
-							type="button"
-							class={[
-								'flex h-9 max-w-full items-center gap-1.5 rounded-lg px-2.5 font-semibold text-fg hover:bg-surface-2',
-								pagesOpen && 'bg-surface-2'
-							]}
-							aria-haspopup="menu"
-							aria-expanded={pagesOpen}
-							onclick={() => (pagesOpen = !pagesOpen)}
-						>
-							<span class="truncate">{current?.title}</span>
-							<ChevronDown size={14} class="shrink-0 text-muted" />
-						</button>
-					</h1>
-					{#if pagesOpen}
-						<div
-							role="menu"
-							class="absolute left-0 mt-1 grid w-56 gap-0.5 rounded-lg border border-border bg-surface p-1 shadow-card"
-						>
-							{#each navPages as page (page.id)}{@render pageLink(page)}{/each}
-							{#if navPages.length && menuPages.length}
-								<div class="my-0.5 border-t border-border"></div>
-							{/if}
-							{#each menuPages as page (page.id)}{@render pageLink(page)}{/each}
-						</div>
-					{/if}
-				</div>
+				<h1 class="m-0 -ml-2.5 min-w-0 text-base">
+					<TitleMenu label={current?.title ?? ''} title="Pages">
+						{#each navPages as page (page.id)}{@render pageLink(page)}{/each}
+						{#if navPages.length && menuPages.length}
+							<div class="my-0.5 border-t border-border"></div>
+						{/if}
+						{#each menuPages as page (page.id)}{@render pageLink(page)}{/each}
+					</TitleMenu>
+				</h1>
 			{/if}
 			{#if authed}
 				<div class="relative ml-auto" bind:this={menu}>
@@ -414,4 +385,5 @@
 			</div>
 		{/if}
 	</main>
+	<PopupHost />
 </div>

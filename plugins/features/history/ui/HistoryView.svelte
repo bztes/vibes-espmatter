@@ -2,13 +2,13 @@
 <script lang="ts">
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import type { Snippet } from 'svelte';
-	import { Dialog, Notice, Spinner } from '#sdk/device-ui';
+	import { Notice, Spinner, openPopup } from '#sdk/device-ui';
 	import RangePicker from './RangePicker.svelte';
 	import SeriesGrid from './SeriesGrid.svelte';
-	import ValueHistory from './ValueHistory.svelte';
 	import { catalog, loadCatalog } from './catalog.svelte';
 	import { Range } from './range.svelte';
-	import { isDiagnostic, seriesKey, seriesLabels } from './sources';
+	import { isDiagnostic, seriesKey, seriesLabels, type Series } from './sources';
+	import { valuePopup } from './value-popup';
 
 	let {
 		device: id,
@@ -37,9 +37,12 @@
 	// Folded away (and not loaded) unless there is nothing else.
 	let showDiagnostics = $state(false);
 
-	// The value shown large.
-	let openKey = $state<string>();
-	const open = $derived(device?.series.find((s) => seriesKey(s) === openKey));
+	/** A value large, starting at the page's range. */
+	function open(s: Series) {
+		if (!device) return;
+		const props = { device: device.id, value: seriesKey(s), view: $state.snapshot(range.view) };
+		openPopup(valuePopup(device.name, label(s), props));
+	}
 </script>
 
 {#if catalog.error && !catalog.current}
@@ -66,7 +69,7 @@
 		source,
 		view: range.view,
 		onzoom: range.zoom,
-		onopen: (k: string) => (openKey = k)
+		onopen: open
 	}}
 	{#if values.length}
 		<SeriesGrid {...grid} series={values} />
@@ -87,15 +90,4 @@
 			<SeriesGrid {...grid} series={diagnostics} diagnostics />
 		{/if}
 	{/if}
-
-	<!-- Starts at the page's range; changed there only for the popup. -->
-	<Dialog
-		bind:open={() => !!open, (v) => !v && (openKey = undefined)}
-		title={open ? `${device.name} · ${label(open)}` : ''}
-		wide
-	>
-		{#if open}
-			<ValueHistory device={device.id} value={seriesKey(open)} view={range.view} />
-		{/if}
-	</Dialog>
 {/if}

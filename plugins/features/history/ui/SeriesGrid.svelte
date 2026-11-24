@@ -29,7 +29,7 @@
 		view: View;
 		onzoom: (from: number, to: number) => void;
 		/** A value's chart opened large. */
-		onopen: (key: string) => void;
+		onopen: (s: Series) => void;
 	} = $props();
 
 	const load = new Loaded(() => ({
@@ -58,7 +58,7 @@
 					type="button"
 					class="mb-2 flex w-full min-w-0 cursor-pointer items-baseline gap-2 rounded text-left hover:text-accent"
 					title="Open {label(s)}"
-					onclick={() => onopen(key)}
+					onclick={() => onopen(s)}
 				>
 					<span class="truncate text-sm font-semibold">{label(s)}</span>
 					<span class="ml-auto shrink-0 font-semibold tabular-nums">{valueText(s, s.value)}</span>

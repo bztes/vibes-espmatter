@@ -9,7 +9,7 @@
 	import Card from '#lib/device-ui/Card.svelte';
 	import { Code, CodeBlock } from '#lib/ui/index.ts';
 	import Shell from '#lib/device-ui/Shell.svelte';
-	import { registerSpotItems, registerValueTargets } from '#sdk/device-ui';
+	import { PopupHost, registerSpotItems, registerValueTargets } from '#sdk/device-ui';
 	import {
 		spotStories,
 		valueTargetStories,
@@ -118,6 +118,7 @@
 						{/if}
 					</div>
 				{/key}
+				<PopupHost />
 				{#if story.api}
 					<details class="mt-6 max-w-3xl text-xs">
 						<summary class="cursor-pointer text-muted">Mocked API</summary>
