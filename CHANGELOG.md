@@ -1,5 +1,19 @@
 # vibes-espmatter
 
+## 0.7.0
+
+### Minor Changes
+
+- [`f56d063`](https://github.com/bztes/vibes-espmatter/commit/f56d06386a7db39eb33cdf44faafce831c3fbf55) Thanks [@bztes](https://github.com/bztes)! - Clicking a value on a device card opens its history; the chart icon is gone.
+
+### Patch Changes
+
+- [`1eb597b`](https://github.com/bztes/vibes-espmatter/commit/1eb597b46c51e6f31054b9e72102243661ba9406) Thanks [@bztes](https://github.com/bztes)! - The history page shows all values of a device at once; values on cards and charts open large in a popup.
+
+- [`4620476`](https://github.com/bztes/vibes-espmatter/commit/4620476c1759c04c05821cf14e8b53d97dd51f41) Thanks [@bztes](https://github.com/bztes)! - The history API reads one value or all values of a device from one endpoint.
+
+- [`2d43c01`](https://github.com/bztes/vibes-espmatter/commit/2d43c01c2494bd53fb38769de7235860469f8f62) Thanks [@bztes](https://github.com/bztes)! - Device web interface popups and title menus share one implementation.
+
 ## 0.6.0
 
 ### Minor Changes
