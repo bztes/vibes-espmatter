@@ -4,7 +4,7 @@
 	import Chart from './Chart.svelte';
 	import { stats, valueText } from './kinds';
 	import { Loaded } from './load.svelte';
-	import { parseDevice, seriesKey, type Series } from './sources';
+	import { parse, seriesKey, type Series } from './sources';
 	import type { View } from './ranges';
 
 	/** Enough buckets for a small chart. */
@@ -33,13 +33,13 @@
 	} = $props();
 
 	const load = new Loaded(() => ({
-		path: `/api/v1/history/device?${new URLSearchParams({
+		path: `/api/v1/history?${new URLSearchParams({
 			device,
 			points: String(POINTS),
 			diagnostics: diagnostics ? '1' : '0'
 		})}`,
 		view,
-		parse: (raw) => parseDevice(source, raw)
+		parse: (raw) => parse(source, raw)
 	}));
 
 	let at = $state<number>();

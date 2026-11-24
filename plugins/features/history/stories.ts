@@ -141,16 +141,17 @@ const ROWS: Record<string, number[][]> = {
 	'device.memory.free': memoryFree
 };
 
-/** Data that fits the metric and range asked for. */
-const history = (url: URL) =>
-	answer(ROWS[url.searchParams.get('metric') ?? ''] ?? temperature, url);
-
-/** All values of a device (diagnostics or the others), rows prefixed with their key. */
-const historyDevice = (url: URL) => {
-	const device = series.devices.find((d) => d.id === url.searchParams.get('device'));
-	const diagnostics = url.searchParams.get('diagnostics') === '1';
+/** Values of a device (one, the diagnostics or the others), rows prefixed with their key. */
+const history = (url: URL) => {
+	const q = url.searchParams;
+	const device = series.devices.find((d) => d.id === q.get('device'));
+	const diagnostics = q.get('diagnostics') === '1';
 	const data = (device?.series ?? [])
-		.filter((s) => s.metric.startsWith('device.') === diagnostics)
+		.filter((s) =>
+			q.get('metric')
+				? s.metric === q.get('metric') && s.labels === (q.get('labels') ?? '')
+				: s.metric.startsWith('device.') === diagnostics
+		)
 		.flatMap((s) =>
 			answer(ROWS[s.metric] ?? temperature, url).data.map((row) => [
 				`${s.metric}|${s.labels}`,
@@ -162,8 +163,7 @@ const historyDevice = (url: URL) => {
 
 const api = {
 	'/api/v1/history/series': series,
-	'/api/v1/history': history,
-	'/api/v1/history/device': historyDevice
+	'/api/v1/history': history
 };
 
 /** Values with a history link to it in the other previews. */
@@ -214,8 +214,7 @@ export const parts = [
 		plain: true,
 		api: {
 			...api,
-			'/api/v1/history': { meta: [], data: [], rows: 0 },
-			'/api/v1/history/device': { meta: [], data: [], rows: 0 }
+			'/api/v1/history': { meta: [], data: [], rows: 0 }
 		}
 	}
 ] satisfies Story[];

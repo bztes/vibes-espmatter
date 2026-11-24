@@ -2,8 +2,8 @@
 // database behind the OpenTelemetry collector. The firmware runs a fixed query per source and
 // passes the answer through unchanged; the web interface reads it.
 //   GET /api/v1/history/series  what can be asked for (and the source)
-//   GET /api/v1/history?device=&metric=&labels=&from=&to=  one series, raw answer of the database
-//   GET /api/v1/history/device?device=&from=&to=&points=&diagnostics=  all values of a device in one answer
+//   GET /api/v1/history?device=&from=&to=&points=&diagnostics=  all values of a device, raw answer
+//       of the database; with &metric=&labels= only that one
 #include "espm.h"
 #include "espm_history.h"
 
@@ -170,35 +170,6 @@ static bool series_visible(const Walk &w, const char *labels)
     return w.node[0] ? node_visible(w.node, labels) : espm_caller_admin();
 }
 
-// ---- One series ----
-
-struct Finder : Walk {
-    const char *metric, *labels;
-    espm_metric_kind_t kind;
-};
-
-static void find_metric(void *arg, const char *name, const char *labels, const char *, double,
-                        espm_metric_kind_t kind)
-{
-    Finder &f = static_cast<Finder &>(*(Walk *)arg);
-    if (f.in && strcmp(name, f.metric) == 0 && strcmp(labels, f.labels) == 0) f.kind = kind;
-}
-
-/** 404 / 403 sent unless the caller may read this series; else its kind (gauge if not reported now). */
-static bool allowed(httpd_req_t *req, const char *device, const char *metric, const char *labels,
-                    espm_metric_kind_t *kind)
-{
-    Finder f = {{device, false, false, {}}, metric, labels, ESPM_GAUGE};
-    if (!walk(f, find_metric)) {
-        espm_send_error(req, 404, "unknown device");
-        return false;
-    }
-    *kind = f.kind;
-    bool ok = series_visible(f, labels);
-    if (!ok) espm_send_error(req, 403, "forbidden");
-    return ok;
-}
-
 static void url_encode(const char *in, char *out, size_t len)
 {
     size_t o = 0;
@@ -307,16 +278,6 @@ static void picked_close(Picked &p)
 }
 
 #if ESPM_HISTORY_CLICKHOUSE
-/** Tables of the collector's ClickHouse exporter (gauges or sums); values only as query parameters. */
-static const char *CLICKHOUSE_SQL =
-    "SELECT toUInt32(toStartOfInterval(toDateTime(TimeUnix), INTERVAL {step:UInt32} SECOND)) AS t,"
-    " avg(Value), min(Value), max(Value), argMax(Value, TimeUnix) FROM %s_%s"
-    " WHERE ResourceAttributes['service.instance.id'] = {device:String} AND MetricName = {metric:String}"
-    " AND hasAll(arrayMap((k, v) -> concat(k, '=', v), mapKeys(Attributes), mapValues(Attributes)),"
-    " {labels:Array(String)})"
-    " AND TimeUnix >= toDateTime({from:UInt32}) AND TimeUnix < toDateTime({to:UInt32})"
-    " GROUP BY t ORDER BY t FORMAT JSONCompact";
-
 /** `db.table` or `table`: it goes into the query as is. */
 static bool table_name(const char *s)
 {
@@ -362,22 +323,7 @@ static void base_url(Request &r, const char *device, long long from, long long t
     append_num(r.url, sizeof(r.url), "param_step", step);
 }
 
-static bool build(Request &r, const char *device, const char *metric, const char *labels, bool counter,
-                  long long from, long long to, long long step)
-{
-    // The exporter's metrics table name; it adds _gauge, _sum, …
-    const char *table = ESPM_HISTORY_TABLE;
-    if (!table_name(table)) return false;
-    if (asprintf(&r.body, CLICKHOUSE_SQL, table, counter ? "sum" : "gauge") < 0) return false;
-    char arr[128];
-    labels_literal(labels, arr, sizeof(arr));
-    base_url(r, device, from, to, step);
-    append(r.url, sizeof(r.url), "param_metric", metric);
-    append(r.url, sizeof(r.url), "param_labels", arr);
-    return true;
-}
-
-static bool build_device(Request &r, const char *device, const Picked &p, long long from, long long to,
+static bool build(Request &r, const char *device, const Picked &p, long long from, long long to,
                          long long step)
 {
     const char *table = ESPM_HISTORY_TABLE;
@@ -451,12 +397,6 @@ static esp_err_t forward(httpd_req_t *req, Request &r)
     return httpd_resp_send_chunk(req, nullptr, 0);
 }
 
-/** Forwards a built request; not built: the source isn't set up (nothing to free). */
-static esp_err_t send_built(httpd_req_t *req, Request &r, bool built)
-{
-    return built ? forward(req, r) : espm_send_error(req, 500, "history source not set up (URL, table)");
-}
-
 /** `from` and `to` of the query, within the limits; false: not given or too long. */
 static bool range_params(const char *query, long long *from, long long *to)
 {
@@ -468,29 +408,10 @@ static bool range_params(const char *query, long long *from, long long *to)
     return *from > 0 && *to > *from && *to - *from <= MAX_RANGE_S;
 }
 
-static esp_err_t history(httpd_req_t *req)
-{
-    char query[512], device[64] = "", metric[32] = "", labels[48] = "";
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) query[0] = 0;
-    query_param(query, "device", device, sizeof(device));
-    query_param(query, "metric", metric, sizeof(metric));
-    query_param(query, "labels", labels, sizeof(labels));
-    long long from, to;
-    if (!plain(device, sizeof(device), false) || !plain(metric, sizeof(metric), false) ||
-        !plain(labels, sizeof(labels), true) || !range_params(query, &from, &to))
-        return espm_send_error(req, 400, "device, metric, from and to (unix seconds) needed");
-    espm_metric_kind_t kind;
-    if (!allowed(req, device, metric, labels, &kind)) return ESP_OK;
-
-    Request r = {};
-    return send_built(req, r,
-                      build(r, device, metric, labels, kind == ESPM_COUNTER, from, to,
-                            step_of(from, to, points_param(query))));
-}
-
 // ---- All values of a device ----
 
 struct Collector : Walk {
+    const char *metric, *labels; // "": all
     bool diagnostics;
     int denied;
     Picked *picked;
@@ -501,7 +422,9 @@ static void collect_metric(void *arg, const char *name, const char *labels, cons
 {
     Collector &c = static_cast<Collector &>(*(Walk *)arg);
     if (!c.in || c.picked->count >= MAX_SERIES) return;
-    if ((strncmp(name, "device.", 7) == 0) != c.diagnostics) return;
+    if (c.metric[0] ? strcmp(name, c.metric) != 0 || strcmp(labels, c.labels) != 0
+                    : (strncmp(name, "device.", 7) == 0) != c.diagnostics)
+        return;
     if (!plain(name, 32, false) || !plain(labels, 48, true)) return;
     if (!series_visible(c, labels)) {
         c.denied++;
@@ -510,20 +433,23 @@ static void collect_metric(void *arg, const char *name, const char *labels, cons
     pick(*c.picked, name, labels, kind == ESPM_COUNTER);
 }
 
-static esp_err_t history_device(httpd_req_t *req)
+static esp_err_t history(httpd_req_t *req)
 {
-    char query[512], device[64] = "", diag[4] = "";
+    char query[512], device[64] = "", metric[32] = "", labels[48] = "", diag[4] = "";
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) query[0] = 0;
     query_param(query, "device", device, sizeof(device));
+    query_param(query, "metric", metric, sizeof(metric));
+    query_param(query, "labels", labels, sizeof(labels));
     query_param(query, "diagnostics", diag, sizeof(diag));
     long long from, to;
-    if (!plain(device, sizeof(device), false) || !range_params(query, &from, &to))
+    if (!plain(device, sizeof(device), false) || !plain(metric, sizeof(metric), true) ||
+        !plain(labels, sizeof(labels), true) || !range_params(query, &from, &to))
         return espm_send_error(req, 400, "device, from and to (unix seconds) needed");
 
     Picked *p = picked_new();
     if (!p) return espm_send_error(req, 500, "out of memory");
-    // Diagnostics (`device.*`) only when asked for, the others otherwise.
-    Collector c = {{device, false, false, {}}, diag[0] == '1', 0, p};
+    // One series, else diagnostics (`device.*`) only when asked for, the others otherwise.
+    Collector c = {{device, false, false, {}}, metric, labels, diag[0] == '1', 0, p};
     bool found = walk(c, collect_metric);
     picked_close(*p);
 
@@ -535,7 +461,8 @@ static esp_err_t history_device(httpd_req_t *req)
         res = httpd_resp_send(req, EMPTY_ANSWER, sizeof(EMPTY_ANSWER) - 1);
     } else {
         Request r = {};
-        res = send_built(req, r, build_device(r, device, *p, from, to, step_of(from, to, points_param(query))));
+        if (build(r, device, *p, from, to, step_of(from, to, points_param(query)))) res = forward(req, r);
+        else res = espm_send_error(req, 500, "history source not set up (URL, table)");
     }
     free(p);
     return res;
@@ -547,6 +474,5 @@ void espm_history_init()
 #if ESPM_HTTP
     espm_route(HTTP_GET, "/api/v1/history/series", series, ESPM_ACCOUNT);
     espm_route(HTTP_GET, "/api/v1/history", history, ESPM_ACCOUNT);
-    espm_route(HTTP_GET, "/api/v1/history/device", history_device, ESPM_ACCOUNT);
 #endif
 }

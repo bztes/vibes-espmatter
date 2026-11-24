@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { axis, format, metricLabel, parse, parseDevice, segments, ticks } from './sources';
+import { axis, format, metricLabel, parse, segments, ticks } from './sources';
 
 describe('history sources', () => {
 	it('read ClickHouse JSONCompact', () => {
 		const raw = {
-			meta: [{ name: 't', type: 'UInt32' }],
+			meta: [{ name: 'key', type: 'String' }],
 			data: [
-				[1200, 21.5, 21, 22, 21.8],
-				[600, '20.5', 20, 21],
-				[1800, null, null, null, null]
+				['t|', 1200, 21.5, 21, 22, 21.8],
+				['t|', 600, '20.5', 20, 21],
+				['t|', 1800, null, null, null, null]
 			],
 			rows: 3
 		};
-		expect(parse('clickhouse', raw)).toEqual([
+		expect(parse('clickhouse', raw).get('t|')).toEqual([
 			{ t: 600, avg: 20.5, min: 20, max: 21, last: 20.5 },
 			{ t: 1200, avg: 21.5, min: 21, max: 22, last: 21.8 }
 		]);
@@ -29,7 +29,7 @@ describe('history sources', () => {
 				[7, 0, 1, 1, 1, 1]
 			]
 		};
-		const by = parseDevice('clickhouse', raw);
+		const by = parse('clickhouse', raw);
 		expect([...by.keys()]).toEqual(['temperature|endpoint=1', 'uptime|']);
 		expect(by.get('temperature|endpoint=1')!.map((p) => p.t)).toEqual([0, 600]);
 		expect(by.get('uptime|')).toEqual([{ t: 600, avg: 5, min: 4, max: 6, last: 6 }]);

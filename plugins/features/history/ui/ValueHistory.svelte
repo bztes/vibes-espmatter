@@ -41,7 +41,7 @@
 			? {
 					path: `/api/v1/history?${new URLSearchParams({ device: id, metric: series.metric, labels: series.labels })}`,
 					view: range.view,
-					parse: (raw: unknown) => parse(source, raw)
+					parse: (raw: unknown) => parse(source, raw).get(value) ?? []
 				}
 			: undefined
 	);

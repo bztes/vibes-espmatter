@@ -75,13 +75,8 @@ function rows(source: string, raw: unknown): unknown[][] {
 	return read(raw);
 }
 
-/** One series: rows of `[t, avg, min, max, last]`. */
-export function parse(source: string, raw: unknown): Point[] {
-	return points(rows(source, raw));
-}
-
-/** All values of a device: rows of `[key, t, avg, min, max, last]`, by series key. */
-export function parseDevice(source: string, raw: unknown): Map<string, Point[]> {
+/** Values of a device: rows of `[key, t, avg, min, max, last]`, by series key. */
+export function parse(source: string, raw: unknown): Map<string, Point[]> {
 	const by = new Map<string, unknown[][]>();
 	for (const [key, ...rest] of rows(source, raw)) {
 		if (typeof key !== 'string') continue;

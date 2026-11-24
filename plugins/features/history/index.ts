@@ -113,58 +113,31 @@ export default defineFeature({
 			{
 				method: 'GET',
 				path: '/api/v1/history',
-				summary: 'Past values of a series',
+				summary: 'Past values of a device',
 				description:
-					'Aggregated by the database into at most 400 buckets (min. 1 minute) of avg/min/max/last. The database’s answer is passed through unchanged: its format depends on `source`.',
+					'Every series of the device the caller may read (or the one given), in one query: at most 400 buckets (min. 1 minute) of avg/min/max/last each; each row starts with the series’ `metric|labels`. Diagnostics (`device.*`) only with `diagnostics=1`, then only them. The database’s answer is passed through unchanged: its format depends on `source`.',
 				auth: 'token',
 				params: [
 					{ name: 'device', type: 'string', description: 'Device id', required: true, in: 'query' },
 					{
-						name: 'metric',
+						name: 'from',
+						type: 'number',
+						description: 'Unix seconds',
+						required: true,
+						in: 'query'
+					},
+					{ name: 'to', type: 'number', description: 'Unix seconds', required: true, in: 'query' },
+					{
+						name: 'points',
+						type: 'number',
+						description: 'At most this many buckets (20–400)',
+						in: 'query'
+					},
+					{ name: 'metric', type: 'string', description: 'Only this series', in: 'query' },
+					{
+						name: 'labels',
 						type: 'string',
-						description: 'Metric name',
-						required: true,
-						in: 'query'
-					},
-					{ name: 'labels', type: 'string', description: 'e.g. `endpoint=1`', in: 'query' },
-					{
-						name: 'from',
-						type: 'number',
-						description: 'Unix seconds',
-						required: true,
-						in: 'query'
-					},
-					{ name: 'to', type: 'number', description: 'Unix seconds', required: true, in: 'query' },
-					{
-						name: 'points',
-						type: 'number',
-						description: 'At most this many buckets (20–400)',
-						in: 'query'
-					}
-				],
-				response: { data: [[1763020800, 21.2, 20.9, 21.6, 21.4]] }
-			},
-			{
-				method: 'GET',
-				path: '/api/v1/history/device',
-				summary: 'Past values of all series of a device',
-				description:
-					'Like `/api/v1/history` for every series of the device the caller may read, in one query; each row starts with the series’ `metric|labels`. Diagnostics (`device.*`) only with `diagnostics=1`, then only them.',
-				auth: 'token',
-				params: [
-					{ name: 'device', type: 'string', description: 'Device id', required: true, in: 'query' },
-					{
-						name: 'from',
-						type: 'number',
-						description: 'Unix seconds',
-						required: true,
-						in: 'query'
-					},
-					{ name: 'to', type: 'number', description: 'Unix seconds', required: true, in: 'query' },
-					{
-						name: 'points',
-						type: 'number',
-						description: 'At most this many buckets (20–400)',
+						description: 'Its labels, e.g. `endpoint=1`',
 						in: 'query'
 					},
 					{ name: 'diagnostics', type: 'string', description: '`1`: the diagnostics', in: 'query' }
