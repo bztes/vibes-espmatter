@@ -1,4 +1,4 @@
-<!-- Time range: a calendar button with steps back and forth; presets and a custom range in a popover. -->
+<!-- Time range: a button with the range and steps back and forth; presets and a custom range in a popover. -->
 <script lang="ts">
 	import Calendar from '@lucide/svelte/icons/calendar';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
@@ -89,7 +89,7 @@
 
 <div
 	class={[
-		'flex h-9 items-stretch divide-x divide-border overflow-hidden rounded-lg border bg-surface transition-colors',
+		'flex h-9 min-w-0 items-stretch divide-x divide-border overflow-hidden rounded-lg border bg-surface text-sm text-fg transition-colors',
 		open ? 'border-accent ring-2 ring-accent/25' : 'border-border-strong'
 	]}
 	bind:this={root}
@@ -99,11 +99,14 @@
 	>
 	<button
 		type="button"
-		class={step}
-		title="Time range: {viewLabel(view)}"
+		class="flex min-w-0 items-center gap-2 px-2.5 whitespace-nowrap hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+		title={viewLabel(view)}
 		aria-haspopup="dialog"
 		aria-expanded={open}
-		onclick={toggle}><Calendar size={16} /></button
+		onclick={toggle}
+		><Calendar size={15} class="shrink-0 text-muted" /><span class="truncate tabular-nums"
+			>{viewLabel(view)}</span
+		></button
 	>
 	<button
 		type="button"

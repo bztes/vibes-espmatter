@@ -3,6 +3,7 @@
 // passes the answer through unchanged; the web interface reads it.
 //   GET /api/v1/history/series  what can be asked for (and the source)
 //   GET /api/v1/history?device=&metric=&labels=&from=&to=  one series, raw answer of the database
+//   GET /api/v1/history/device?device=&from=&to=&points=&diagnostics=  all values of a device in one answer
 #include "espm.h"
 #include "espm_history.h"
 
@@ -18,6 +19,7 @@ static const char *TAG = "espm_history";
 static constexpr int MAX_POINTS = 400;
 static constexpr int MIN_STEP_S = 60;
 static constexpr long long MAX_RANGE_S = 10LL * 366 * 86400;
+static constexpr int MAX_SERIES = 32;
 
 #if ESPM_HTTP
 
@@ -133,28 +135,52 @@ static esp_err_t series(httpd_req_t *req)
     return espm_send_json(req, json);
 }
 
-// ---- One series ----
+// ---- One device ----
 
-struct Finder {
-    const char *id, *metric, *labels;
+/** One device's metrics; `in` while they are reported. */
+struct Walk {
+    const char *id;
     bool in, found;
     char node[24];
-    espm_metric_kind_t kind;
 };
 
-static void find_device(void *arg, const char *id, const char *, const char *node)
+static void walk_device(void *arg, const char *id, const char *, const char *node)
 {
-    Finder &f = *(Finder *)arg;
-    f.in = !f.found && strcmp(id, f.id) == 0;
-    if (!f.in) return;
-    f.found = true;
-    strlcpy(f.node, node ? node : "", sizeof(f.node));
+    Walk &w = *(Walk *)arg;
+    w.in = !w.found && strcmp(id, w.id) == 0;
+    if (!w.in) return;
+    w.found = true;
+    strlcpy(w.node, node ? node : "", sizeof(w.node));
 }
+
+/** Reports device `w.id` to `metric` (its arg is `&w`); false: unknown device. */
+static bool walk(Walk &w, decltype(espm_metric_sink_t::metric) metric)
+{
+    espm_metric_sink_t sink = {walk_device, metric, &w};
+    bool own = strcmp(w.id, ESPM_DEVICE_ID) == 0;
+    if (own) espm_metrics_own_report(&sink);
+    int remotes = own ? 0 : espm_metrics_remote_count();
+    for (int i = 0; i < remotes && !w.found; i++) espm_metrics_remote_report(i, &sink);
+    return w.found;
+}
+
+/** The caller may read this series of the walked device. */
+static bool series_visible(const Walk &w, const char *labels)
+{
+    return w.node[0] ? node_visible(w.node, labels) : espm_caller_admin();
+}
+
+// ---- One series ----
+
+struct Finder : Walk {
+    const char *metric, *labels;
+    espm_metric_kind_t kind;
+};
 
 static void find_metric(void *arg, const char *name, const char *labels, const char *, double,
                         espm_metric_kind_t kind)
 {
-    Finder &f = *(Finder *)arg;
+    Finder &f = static_cast<Finder &>(*(Walk *)arg);
     if (f.in && strcmp(name, f.metric) == 0 && strcmp(labels, f.labels) == 0) f.kind = kind;
 }
 
@@ -162,18 +188,13 @@ static void find_metric(void *arg, const char *name, const char *labels, const c
 static bool allowed(httpd_req_t *req, const char *device, const char *metric, const char *labels,
                     espm_metric_kind_t *kind)
 {
-    Finder f = {device, metric, labels, false, false, {}, ESPM_GAUGE};
-    espm_metric_sink_t sink = {find_device, find_metric, &f};
-    bool own = strcmp(device, ESPM_DEVICE_ID) == 0;
-    if (own) espm_metrics_own_report(&sink);
-    int remotes = own ? 0 : espm_metrics_remote_count();
-    for (int i = 0; i < remotes && !f.found; i++) espm_metrics_remote_report(i, &sink);
-    if (!f.found) {
+    Finder f = {{device, false, false, {}}, metric, labels, ESPM_GAUGE};
+    if (!walk(f, find_metric)) {
         espm_send_error(req, 404, "unknown device");
         return false;
     }
     *kind = f.kind;
-    bool ok = f.node[0] ? node_visible(f.node, labels) : espm_caller_admin();
+    bool ok = series_visible(f, labels);
     if (!ok) espm_send_error(req, 403, "forbidden");
     return ok;
 }
@@ -208,6 +229,83 @@ struct Request {
     char *body; // freed by the caller
 };
 
+/** Bucket length for `points` buckets over the range. */
+static long long step_of(long long from, long long to, int points)
+{
+    long long step = (to - from + points - 1) / points;
+    return step < MIN_STEP_S ? MIN_STEP_S : step;
+}
+
+/** `?points=`: fewer buckets for small charts, within [20, MAX_POINTS]. */
+static int points_param(const char *query)
+{
+    char s[8] = "";
+    query_param(query, "points", s, sizeof(s));
+    int n = atoi(s);
+    return n <= 0 || n > MAX_POINTS ? MAX_POINTS : n < 20 ? 20 : n;
+}
+
+/** Series of a device, as SQL literals of the query. */
+struct Picked {
+    char keys[MAX_SERIES * 88];     // ['metric|labels', …]
+    char metrics[MAX_SERIES * 36];  // ['metric', …]
+    char labels[MAX_SERIES * 96];   // [['k=v', …], …]
+    char counters[MAX_SERIES * 2 + 2]; // [0, 1, …]
+    int count;
+};
+
+static void literal_add(char *lit, size_t len, const char *item)
+{
+    size_t n = strlen(lit);
+    snprintf(lit + n, len - n, "%s%s", n > 1 ? "," : "", item);
+}
+
+/** `k=v,k2=v2` as `['k=v','k2=v2']` – the values contain no quotes (plain()). */
+static void labels_literal(const char *labels, char *out, size_t len)
+{
+    strlcpy(out, "[", len);
+    char copy[48], item[52];
+    strlcpy(copy, labels, sizeof(copy));
+    for (char *save, *kv = strtok_r(copy, ",", &save); kv; kv = strtok_r(nullptr, ",", &save)) {
+        snprintf(item, sizeof(item), "'%s'", kv);
+        literal_add(out, len, item);
+    }
+    strlcat(out, "]", len);
+}
+
+static void pick(Picked &p, const char *metric, const char *labels, bool counter)
+{
+    char item[128];
+    snprintf(item, sizeof(item), "'%s|%s'", metric, labels);
+    literal_add(p.keys, sizeof(p.keys), item);
+    snprintf(item, sizeof(item), "'%s'", metric);
+    literal_add(p.metrics, sizeof(p.metrics), item);
+    labels_literal(labels, item, sizeof(item));
+    literal_add(p.labels, sizeof(p.labels), item);
+    literal_add(p.counters, sizeof(p.counters), counter ? "1" : "0");
+    p.count++;
+}
+
+/** Empty literals, on the heap (several KB); null: out of memory. */
+static Picked *picked_new()
+{
+    Picked *p = (Picked *)calloc(1, sizeof(Picked));
+    if (!p) return nullptr;
+    strcpy(p->keys, "[");
+    strcpy(p->metrics, "[");
+    strcpy(p->labels, "[");
+    strcpy(p->counters, "[");
+    return p;
+}
+
+static void picked_close(Picked &p)
+{
+    strlcat(p.keys, "]", sizeof(p.keys));
+    strlcat(p.metrics, "]", sizeof(p.metrics));
+    strlcat(p.labels, "]", sizeof(p.labels));
+    strlcat(p.counters, "]", sizeof(p.counters));
+}
+
 #if ESPM_HISTORY_CLICKHOUSE
 /** Tables of the collector's ClickHouse exporter (gauges or sums); values only as query parameters. */
 static const char *CLICKHOUSE_SQL =
@@ -232,6 +330,38 @@ static bool table_name(const char *s)
     return true;
 }
 
+/** Rows of one table (`%s_<kind>`) with the index of the picked series they belong to (0: none). */
+#define CLICKHOUSE_DEVICE_PART(counter, kind)                                                         \
+    "SELECT TimeUnix, Value,"                                                                       \
+    " arrayMap((k, v) -> concat(k, '=', v), mapKeys(Attributes), mapValues(Attributes)) AS kv,"     \
+    " arrayFirstIndex((m, l, c) -> c = " counter " AND m = MetricName AND hasAll(kv, l), sm, sl, sc)" \
+    " AS s FROM %s_" kind                                                                           \
+    " WHERE ResourceAttributes['service.instance.id'] = {device:String} AND has(sm, MetricName)"    \
+    " AND TimeUnix >= toDateTime({from:UInt32}) AND TimeUnix < toDateTime({to:UInt32})"
+
+/** All picked series of a device: rows of `[key, t, avg, min, max, last]`, by key and time. */
+static const char *CLICKHOUSE_DEVICE_SQL =
+    "WITH CAST(%s AS Array(String)) AS sk, CAST(%s AS Array(String)) AS sm,"
+    " CAST(%s AS Array(Array(String))) AS sl, CAST(%s AS Array(UInt8)) AS sc"
+    " SELECT sk[s] AS key,"
+    " toUInt32(toStartOfInterval(toDateTime(TimeUnix), INTERVAL {step:UInt32} SECOND)) AS t,"
+    " avg(Value), min(Value), max(Value), argMax(Value, TimeUnix)"
+    " FROM (" CLICKHOUSE_DEVICE_PART("0", "gauge") " UNION ALL " CLICKHOUSE_DEVICE_PART("1", "sum") ")"
+    " WHERE s > 0 GROUP BY s, t ORDER BY s, t FORMAT JSONCompact";
+
+/** URL of the database with the parameters every query has. */
+static void base_url(Request &r, const char *device, long long from, long long to, long long step)
+{
+    snprintf(r.url, sizeof(r.url), "%s", ESPM_HISTORY_URL);
+    size_t n = strlen(r.url);
+    while (n && r.url[n - 1] == '/') r.url[--n] = 0;
+    strlcat(r.url, "/", sizeof(r.url));
+    append(r.url, sizeof(r.url), "param_device", device);
+    append_num(r.url, sizeof(r.url), "param_from", from);
+    append_num(r.url, sizeof(r.url), "param_to", to);
+    append_num(r.url, sizeof(r.url), "param_step", step);
+}
+
 static bool build(Request &r, const char *device, const char *metric, const char *labels, bool counter,
                   long long from, long long to, long long step)
 {
@@ -239,29 +369,26 @@ static bool build(Request &r, const char *device, const char *metric, const char
     const char *table = ESPM_HISTORY_TABLE;
     if (!table_name(table)) return false;
     if (asprintf(&r.body, CLICKHOUSE_SQL, table, counter ? "sum" : "gauge") < 0) return false;
-
-    // Array(String) literal: ['k=v','k2=v2'] – the values contain no quotes (plain()).
-    char arr[128] = "[";
-    char copy[48];
-    strlcpy(copy, labels, sizeof(copy));
-    for (char *save, *kv = strtok_r(copy, ",", &save); kv; kv = strtok_r(nullptr, ",", &save)) {
-        size_t n = strlen(arr);
-        snprintf(arr + n, sizeof(arr) - n, "%s'%s'", n > 1 ? "," : "", kv);
-    }
-    strlcat(arr, "]", sizeof(arr));
-
-    snprintf(r.url, sizeof(r.url), "%s", ESPM_HISTORY_URL);
-    size_t n = strlen(r.url);
-    while (n && r.url[n - 1] == '/') r.url[--n] = 0;
-    strlcat(r.url, "/", sizeof(r.url));
-    append(r.url, sizeof(r.url), "param_device", device);
+    char arr[128];
+    labels_literal(labels, arr, sizeof(arr));
+    base_url(r, device, from, to, step);
     append(r.url, sizeof(r.url), "param_metric", metric);
     append(r.url, sizeof(r.url), "param_labels", arr);
-    append_num(r.url, sizeof(r.url), "param_from", from);
-    append_num(r.url, sizeof(r.url), "param_to", to);
-    append_num(r.url, sizeof(r.url), "param_step", step);
     return true;
 }
+
+static bool build_device(Request &r, const char *device, const Picked &p, long long from, long long to,
+                         long long step)
+{
+    const char *table = ESPM_HISTORY_TABLE;
+    if (!table_name(table)) return false;
+    if (asprintf(&r.body, CLICKHOUSE_DEVICE_SQL, p.keys, p.metrics, p.labels, p.counters, table, table) < 0)
+        return false;
+    base_url(r, device, from, to, step);
+    return true;
+}
+
+static const char EMPTY_ANSWER[] = "{\"data\":[]}";
 
 static void auth(esp_http_client_handle_t c)
 {
@@ -286,29 +413,9 @@ static esp_err_t upstream_error(httpd_req_t *req, esp_http_client_handle_t c, in
     return espm_send_error(req, 502, text);
 }
 
-static esp_err_t history(httpd_req_t *req)
+/** Sends the request to the database and passes its answer through; frees the body. */
+static esp_err_t forward(httpd_req_t *req, Request &r)
 {
-    char query[512], device[64] = "", metric[32] = "", labels[48] = "", from_s[16] = "", to_s[16] = "";
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) query[0] = 0;
-    query_param(query, "device", device, sizeof(device));
-    query_param(query, "metric", metric, sizeof(metric));
-    query_param(query, "labels", labels, sizeof(labels));
-    query_param(query, "from", from_s, sizeof(from_s));
-    query_param(query, "to", to_s, sizeof(to_s));
-    long long from = atoll(from_s), to = atoll(to_s);
-    if (!plain(device, sizeof(device), false) || !plain(metric, sizeof(metric), false) ||
-        !plain(labels, sizeof(labels), true) || from <= 0 || to <= from || to - from > MAX_RANGE_S)
-        return espm_send_error(req, 400, "device, metric, from and to (unix seconds) needed");
-    espm_metric_kind_t kind;
-    if (!allowed(req, device, metric, labels, &kind)) return ESP_OK;
-    long long step = (to - from + MAX_POINTS - 1) / MAX_POINTS;
-    if (step < MIN_STEP_S) step = MIN_STEP_S;
-
-    Request r = {};
-    if (!build(r, device, metric, labels, kind == ESPM_COUNTER, from, to, step)) {
-        free(r.body);
-        return espm_send_error(req, 500, "history source not set up (URL, table)");
-    }
     esp_http_client_config_t cfg = {};
     cfg.url = r.url;
     cfg.method = HTTP_METHOD_POST;
@@ -343,6 +450,96 @@ static esp_err_t history(httpd_req_t *req)
     esp_http_client_cleanup(c);
     return httpd_resp_send_chunk(req, nullptr, 0);
 }
+
+/** Forwards a built request; not built: the source isn't set up (nothing to free). */
+static esp_err_t send_built(httpd_req_t *req, Request &r, bool built)
+{
+    return built ? forward(req, r) : espm_send_error(req, 500, "history source not set up (URL, table)");
+}
+
+/** `from` and `to` of the query, within the limits; false: not given or too long. */
+static bool range_params(const char *query, long long *from, long long *to)
+{
+    char from_s[16] = "", to_s[16] = "";
+    query_param(query, "from", from_s, sizeof(from_s));
+    query_param(query, "to", to_s, sizeof(to_s));
+    *from = atoll(from_s);
+    *to = atoll(to_s);
+    return *from > 0 && *to > *from && *to - *from <= MAX_RANGE_S;
+}
+
+static esp_err_t history(httpd_req_t *req)
+{
+    char query[512], device[64] = "", metric[32] = "", labels[48] = "";
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) query[0] = 0;
+    query_param(query, "device", device, sizeof(device));
+    query_param(query, "metric", metric, sizeof(metric));
+    query_param(query, "labels", labels, sizeof(labels));
+    long long from, to;
+    if (!plain(device, sizeof(device), false) || !plain(metric, sizeof(metric), false) ||
+        !plain(labels, sizeof(labels), true) || !range_params(query, &from, &to))
+        return espm_send_error(req, 400, "device, metric, from and to (unix seconds) needed");
+    espm_metric_kind_t kind;
+    if (!allowed(req, device, metric, labels, &kind)) return ESP_OK;
+
+    Request r = {};
+    return send_built(req, r,
+                      build(r, device, metric, labels, kind == ESPM_COUNTER, from, to,
+                            step_of(from, to, points_param(query))));
+}
+
+// ---- All values of a device ----
+
+struct Collector : Walk {
+    bool diagnostics;
+    int denied;
+    Picked *picked;
+};
+
+static void collect_metric(void *arg, const char *name, const char *labels, const char *, double,
+                           espm_metric_kind_t kind)
+{
+    Collector &c = static_cast<Collector &>(*(Walk *)arg);
+    if (!c.in || c.picked->count >= MAX_SERIES) return;
+    if ((strncmp(name, "device.", 7) == 0) != c.diagnostics) return;
+    if (!plain(name, 32, false) || !plain(labels, 48, true)) return;
+    if (!series_visible(c, labels)) {
+        c.denied++;
+        return;
+    }
+    pick(*c.picked, name, labels, kind == ESPM_COUNTER);
+}
+
+static esp_err_t history_device(httpd_req_t *req)
+{
+    char query[512], device[64] = "", diag[4] = "";
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) query[0] = 0;
+    query_param(query, "device", device, sizeof(device));
+    query_param(query, "diagnostics", diag, sizeof(diag));
+    long long from, to;
+    if (!plain(device, sizeof(device), false) || !range_params(query, &from, &to))
+        return espm_send_error(req, 400, "device, from and to (unix seconds) needed");
+
+    Picked *p = picked_new();
+    if (!p) return espm_send_error(req, 500, "out of memory");
+    // Diagnostics (`device.*`) only when asked for, the others otherwise.
+    Collector c = {{device, false, false, {}}, diag[0] == '1', 0, p};
+    bool found = walk(c, collect_metric);
+    picked_close(*p);
+
+    esp_err_t res;
+    if (!found) res = espm_send_error(req, 404, "unknown device");
+    else if (!p->count && c.denied) res = espm_send_error(req, 403, "forbidden");
+    else if (!p->count) {
+        httpd_resp_set_type(req, "application/json");
+        res = httpd_resp_send(req, EMPTY_ANSWER, sizeof(EMPTY_ANSWER) - 1);
+    } else {
+        Request r = {};
+        res = send_built(req, r, build_device(r, device, *p, from, to, step_of(from, to, points_param(query))));
+    }
+    free(p);
+    return res;
+}
 #endif
 
 void espm_history_init()
@@ -350,5 +547,6 @@ void espm_history_init()
 #if ESPM_HTTP
     espm_route(HTTP_GET, "/api/v1/history/series", series, ESPM_ACCOUNT);
     espm_route(HTTP_GET, "/api/v1/history", history, ESPM_ACCOUNT);
+    espm_route(HTTP_GET, "/api/v1/history/device", history_device, ESPM_ACCOUNT);
 #endif
 }

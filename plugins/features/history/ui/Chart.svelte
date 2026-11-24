@@ -1,7 +1,7 @@
 <!--
 	Gauges: line of the averages over a min/max band. Counters: line of the readings. States: steps of
 	the readings over the values each bucket went through. Gaps left open; hover shows a bucket,
-	dragging zooms.
+	dragging zooms. Charts bound to the same `at` share the hover line.
 -->
 <script lang="ts">
 	import { highShare, valueText } from './kinds';
@@ -13,19 +13,23 @@
 		series,
 		from,
 		to,
+		at = $bindable(),
 		onzoom
 	}: {
 		points: Point[];
 		series: Series;
 		from: number;
 		to: number;
+		/** Time under the mouse, in this chart or one bound to the same value. */
+		at?: number;
 		/** A range dragged out with the mouse. */
 		onzoom?: (from: number, to: number) => void;
 	} = $props();
 
-	const H = 240;
 	const PAD = { top: 12, right: 12, bottom: 24 };
 	let width = $state(600);
+	// Set by the parent's CSS.
+	let height = $state(360);
 
 	const kind = $derived(series.kind);
 	const line = $derived(kind === 'gauge' ? 'avg' : 'last');
@@ -40,25 +44,30 @@
 		return [...new Set(seen)].sort((a, b) => a - b);
 	});
 
+	// What the axis has to cover: the states shown, else the values.
 	const range = $derived.by(() => {
-		const [lk, hk] = kind === 'counter' ? (['last', 'last'] as const) : (['min', 'max'] as const);
 		let lo = Infinity;
 		let hi = -Infinity;
-		for (const p of points) {
-			lo = Math.min(lo, p[lk]);
-			hi = Math.max(hi, p[hk]);
+		if (kind === 'state') {
+			lo = states[0];
+			hi = states[states.length - 1];
+		} else {
+			const [lk, hk] = kind === 'counter' ? (['last', 'last'] as const) : (['min', 'max'] as const);
+			for (const p of points) {
+				lo = Math.min(lo, p[lk]);
+				hi = Math.max(hi, p[hk]);
+			}
 		}
 		if (!Number.isFinite(lo)) return { lo: 0, hi: 1 };
-		if (kind === 'state') return { lo: lo - 0.5, hi: hi + 0.5 };
 		if (hi - lo < 1e-9) return { lo: lo - 1, hi: hi + 1 };
-		const pad = (hi - lo) * 0.08;
+		const pad = (hi - lo) * 0.03;
 		return { lo: lo - pad, hi: hi + pad };
 	});
 
 	const yTicks = $derived(
 		kind === 'state'
 			? states.map((v) => ({ v, label: text(v) }))
-			: axis(range.lo, range.hi, series.unit, 4)
+			: axis(range.lo, range.hi, series.unit, Math.max(3, Math.round(height / 60)))
 	);
 	// Room for the longest tick label (state names).
 	const padLeft = $derived(Math.max(52, ...yTicks.map((t) => t.label.length * 6 + 12)));
@@ -66,7 +75,7 @@
 	const plotW = $derived(Math.max(1, width - padLeft - PAD.right));
 	const x = (t: number) => padLeft + ((t - from) / (to - from)) * plotW;
 	const y = (v: number) =>
-		PAD.top + (1 - (v - range.lo) / (range.hi - range.lo)) * (H - PAD.top - PAD.bottom);
+		PAD.top + (1 - (v - range.lo) / (range.hi - range.lo)) * (height - PAD.top - PAD.bottom);
 
 	const runs = $derived(segments(points));
 	/** Corners of a line through `key`: states hold each value until the bucket ends. */
@@ -104,7 +113,18 @@
 		timeStyle: 'short'
 	});
 
-	let hoverAt = $state<number>();
+	// The bucket nearest to `at`, if one is that close; the tooltip only where the mouse is.
+	let inside = $state(false);
+	const hoverAt = $derived.by(() => {
+		if (at === undefined) return undefined;
+		let best: number | undefined;
+		points.forEach((p, i) => {
+			if (best === undefined || Math.abs(p.t - at!) < Math.abs(points[best].t - at!)) best = i;
+		});
+		return best !== undefined && (inside || Math.abs(points[best].t - at) <= step)
+			? best
+			: undefined;
+	});
 	const hover = $derived(hoverAt === undefined ? undefined : points[hoverAt]);
 	// Mouse drag: times where it started and where it is now.
 	let drag = $state<{ a: number; b: number }>();
@@ -117,11 +137,8 @@
 	function move(e: PointerEvent) {
 		const t = timeAt(e);
 		if (drag) drag.b = t;
-		let best: number | undefined;
-		points.forEach((p, i) => {
-			if (best === undefined || Math.abs(p.t - t) < Math.abs(points[best].t - t)) best = i;
-		});
-		hoverAt = best;
+		inside = true;
+		at = t;
 	}
 	function down(e: PointerEvent) {
 		if (!onzoom || e.pointerType !== 'mouse' || e.button !== 0) return;
@@ -142,10 +159,10 @@
 	}
 </script>
 
-<div class="relative" bind:clientWidth={width}>
+<div class="relative h-full" bind:clientWidth={width} bind:clientHeight={height}>
 	<svg
 		{width}
-		height={H}
+		{height}
 		class={['block touch-pan-y select-none', onzoom && 'cursor-crosshair']}
 		role="img"
 		aria-label="Chart"
@@ -153,7 +170,10 @@
 		onpointerdown={down}
 		onpointerup={up}
 		onpointercancel={() => (drag = undefined)}
-		onpointerleave={() => (hoverAt = undefined)}
+		onpointerleave={() => {
+			inside = false;
+			at = undefined;
+		}}
 	>
 		{#each yTicks as { v, label } (v)}
 			<line x1={padLeft} x2={width - PAD.right} y1={y(v)} y2={y(v)} class="stroke-border" />
@@ -162,7 +182,7 @@
 			>
 		{/each}
 		{#each xTicks.ticks as t (t)}
-			<text x={x(t)} y={H - 6} text-anchor="middle" class="fill-muted text-[11px]"
+			<text x={x(t)} y={height - 6} text-anchor="middle" class="fill-muted text-[11px]"
 				>{tickLabel(t)}</text
 			>
 		{/each}
@@ -184,7 +204,7 @@
 				x={x(Math.min(drag.a, drag.b))}
 				y={PAD.top}
 				width={Math.abs(x(drag.b) - x(drag.a))}
-				height={H - PAD.top - PAD.bottom}
+				height={height - PAD.top - PAD.bottom}
 				class="fill-accent/10 stroke-accent/40"
 			/>
 		{/if}
@@ -193,13 +213,13 @@
 				x1={x(hover.t)}
 				x2={x(hover.t)}
 				y1={PAD.top}
-				y2={H - PAD.bottom}
+				y2={height - PAD.bottom}
 				class="stroke-border-strong"
 			/>
 			<circle cx={x(hover.t)} cy={y(hover[line])} r="3.5" class="fill-accent stroke-surface" />
 		{/if}
 	</svg>
-	{#if hover}
+	{#if hover && inside}
 		<div
 			class="pointer-events-none absolute top-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs shadow-popover"
 			style:left="{Math.min(Math.max(x(hover.t) - 80, 0), width - 170)}px"

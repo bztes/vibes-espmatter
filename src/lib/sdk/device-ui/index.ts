@@ -35,7 +35,8 @@ export {
 	type ValueRef,
 	type ValueSeries,
 	type ValueTarget,
-	type ValueLinkTarget
+	type ValueLinkTarget,
+	type ValuePopup
 } from './values.svelte';
 export {
 	api,

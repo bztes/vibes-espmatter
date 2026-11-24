@@ -1,3 +1,4 @@
+import type { Component } from 'svelte';
 import type { DeviceRef } from './spots.svelte';
 
 /** A value of a device: its telemetry series. */
@@ -5,11 +6,19 @@ export type ValueSeries = DeviceRef & { metric: string; labels?: string };
 /** A value a card shows, with its name on the card. */
 export type ValueRef = ValueSeries & { label: string };
 
-/** Where a click on a value leads. */
+/** A component shown in a dialog over the page. */
+export interface ValuePopup {
+	title: string;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	component: Component<any>;
+	props?: Record<string, unknown>;
+}
+
+/** What a click on a value opens. */
 export interface ValueLinkTarget {
-	href: string;
 	/** Tooltip, e.g. "History of Power". */
 	title: string;
+	popup: ValuePopup;
 }
 
 /**

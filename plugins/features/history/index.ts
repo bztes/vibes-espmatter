@@ -8,7 +8,7 @@ export default defineFeature({
 	id: 'history',
 	name: 'History',
 	description:
-		'Charts of past values – days, weeks, years – of this device and its paired devices, opened by clicking a value on their cards. Read from the database the OpenTelemetry collector writes to.',
+		'Charts of past values – days, weeks, years – of this device and its paired devices: all values of a device at once; a value on a card opens its chart in a popup. Read from the database the OpenTelemetry collector writes to.',
 	icon: 'chart-line',
 	kinds: ['hub', 'device'],
 	needs: ['ip'],
@@ -134,9 +134,42 @@ export default defineFeature({
 						required: true,
 						in: 'query'
 					},
-					{ name: 'to', type: 'number', description: 'Unix seconds', required: true, in: 'query' }
+					{ name: 'to', type: 'number', description: 'Unix seconds', required: true, in: 'query' },
+					{
+						name: 'points',
+						type: 'number',
+						description: 'At most this many buckets (20–400)',
+						in: 'query'
+					}
 				],
 				response: { data: [[1763020800, 21.2, 20.9, 21.6, 21.4]] }
+			},
+			{
+				method: 'GET',
+				path: '/api/v1/history/device',
+				summary: 'Past values of all series of a device',
+				description:
+					'Like `/api/v1/history` for every series of the device the caller may read, in one query; each row starts with the series’ `metric|labels`. Diagnostics (`device.*`) only with `diagnostics=1`, then only them.',
+				auth: 'token',
+				params: [
+					{ name: 'device', type: 'string', description: 'Device id', required: true, in: 'query' },
+					{
+						name: 'from',
+						type: 'number',
+						description: 'Unix seconds',
+						required: true,
+						in: 'query'
+					},
+					{ name: 'to', type: 'number', description: 'Unix seconds', required: true, in: 'query' },
+					{
+						name: 'points',
+						type: 'number',
+						description: 'At most this many buckets (20–400)',
+						in: 'query'
+					},
+					{ name: 'diagnostics', type: 'string', description: '`1`: the diagnostics', in: 'query' }
+				],
+				response: { data: [['temperature|endpoint=1', 1763020800, 21.2, 20.9, 21.6, 21.4]] }
 			}
 		);
 		out.valueTarget({ file: 'value-target.ts' });

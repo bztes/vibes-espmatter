@@ -1,8 +1,9 @@
-<!-- A value on a card: links to what a plugin opens for it (`out.valueTarget()`), else just shows it. -->
+<!-- A value on a card: opens what a plugin has for it (`out.valueTarget()`) in a popup; else just shows it. -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { ClassValue } from 'svelte/elements';
-	import { valueTarget, type ValueRef } from './values.svelte';
+	import Dialog from './Dialog.svelte';
+	import { valueTarget, type ValuePopup, type ValueRef } from './values.svelte';
 
 	let {
 		ref,
@@ -11,19 +12,25 @@
 	}: { ref: ValueRef; class?: ClassValue; children: Snippet } = $props();
 
 	const target = $derived(valueTarget(ref));
+	// Kept from the click: a target that goes away meanwhile doesn't close it.
+	let shown = $state<ValuePopup>();
 </script>
 
 {#if target}
-	<!-- eslint-disable svelte/no-navigation-without-resolve -- a hash route of the device web interface -->
-	<a
-		href={target.href}
+	<button
+		type="button"
 		title={target.title}
 		class={[
-			'text-inherit no-underline transition-colors hover:bg-border/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+			'cursor-pointer text-left text-inherit no-underline transition-colors hover:bg-border/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
 			className
-		]}>{@render children()}</a
+		]}
+		onclick={() => (shown = target.popup)}>{@render children()}</button
 	>
-	<!-- eslint-enable svelte/no-navigation-without-resolve -->
 {:else}
 	<div class={className}>{@render children()}</div>
+{/if}
+{#if shown}
+	<Dialog bind:open={() => true, () => (shown = undefined)} title={shown.title} wide>
+		<shown.component {...shown.props} />
+	</Dialog>
 {/if}

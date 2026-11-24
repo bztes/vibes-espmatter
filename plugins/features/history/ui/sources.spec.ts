@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { axis, format, metricLabel, parse, segments, ticks } from './sources';
+import { axis, format, metricLabel, parse, parseDevice, segments, ticks } from './sources';
 
 describe('history sources', () => {
 	it('read ClickHouse JSONCompact', () => {
@@ -18,6 +18,21 @@ describe('history sources', () => {
 		]);
 		expect(() => parse('clickhouse', { exception: 'x' })).toThrow();
 		expect(() => parse('nope', {})).toThrow(/Unknown/);
+	});
+
+	it('read all values of a device by key', () => {
+		const raw = {
+			data: [
+				['temperature|endpoint=1', 600, 20, 19, 21, 20],
+				['uptime|', 600, 5, 4, 6, 6],
+				['temperature|endpoint=1', 0, 18, 17, 19, 18],
+				[7, 0, 1, 1, 1, 1]
+			]
+		};
+		const by = parseDevice('clickhouse', raw);
+		expect([...by.keys()]).toEqual(['temperature|endpoint=1', 'uptime|']);
+		expect(by.get('temperature|endpoint=1')!.map((p) => p.t)).toEqual([0, 600]);
+		expect(by.get('uptime|')).toEqual([{ t: 600, avg: 5, min: 4, max: 6, last: 6 }]);
 	});
 
 	it('break lines at gaps', () => {

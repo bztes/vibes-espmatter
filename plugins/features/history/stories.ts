@@ -1,6 +1,7 @@
 import type { Story, ValueTargetStory } from '#sdk/device-ui';
 import HistoryPage from './ui/HistoryPage.svelte';
 import HistoryView from './ui/HistoryView.svelte';
+import ValueHistory from './ui/ValueHistory.svelte';
 import target from './ui/value-target';
 
 const series = {
@@ -131,20 +132,39 @@ function answer(rows: number[][], url: URL) {
 	return { meta: [], data: out, rows: out.length };
 }
 
-/** Data that fits the metric and range asked for. */
-const history = (url: URL) => {
-	const rows: Record<string, number[][]> = {
-		on_off: onOff,
-		'device.online': onOff,
-		energy,
-		power,
-		'device.uptime': uptime,
-		'device.memory.free': memoryFree
-	};
-	return answer(rows[url.searchParams.get('metric') ?? ''] ?? temperature, url);
+const ROWS: Record<string, number[][]> = {
+	on_off: onOff,
+	'device.online': onOff,
+	energy,
+	power,
+	'device.uptime': uptime,
+	'device.memory.free': memoryFree
 };
 
-const api = { '/api/v1/history/series': series, '/api/v1/history': history };
+/** Data that fits the metric and range asked for. */
+const history = (url: URL) =>
+	answer(ROWS[url.searchParams.get('metric') ?? ''] ?? temperature, url);
+
+/** All values of a device (diagnostics or the others), rows prefixed with their key. */
+const historyDevice = (url: URL) => {
+	const device = series.devices.find((d) => d.id === url.searchParams.get('device'));
+	const diagnostics = url.searchParams.get('diagnostics') === '1';
+	const data = (device?.series ?? [])
+		.filter((s) => s.metric.startsWith('device.') === diagnostics)
+		.flatMap((s) =>
+			answer(ROWS[s.metric] ?? temperature, url).data.map((row) => [
+				`${s.metric}|${s.labels}`,
+				...row
+			])
+		);
+	return { meta: [], data, rows: data.length };
+};
+
+const api = {
+	'/api/v1/history/series': series,
+	'/api/v1/history': history,
+	'/api/v1/history/device': historyDevice
+};
 
 /** Values with a history link to it in the other previews. */
 export const valueTargetStories: ValueTargetStory[] = [{ target, api }];
@@ -156,11 +176,18 @@ export default [
 /** What the history page shows of a device. */
 export const parts = [
 	{
-		name: 'Temperature',
+		name: 'All values with diagnostics',
 		component: HistoryView,
 		props: { device: 'a1b2c3d4/node-18' },
 		wide: true,
 		plain: true,
+		api
+	},
+	{
+		name: 'Temperature large',
+		component: ValueHistory,
+		props: { device: 'a1b2c3d4/node-18', value: 'temperature|endpoint=1' },
+		wide: true,
 		api
 	},
 	{
@@ -185,6 +212,10 @@ export const parts = [
 		props: { device: 'a1b2c3d4/node-18' },
 		wide: true,
 		plain: true,
-		api: { ...api, '/api/v1/history': { meta: [], data: [], rows: 0 } }
+		api: {
+			...api,
+			'/api/v1/history': { meta: [], data: [], rows: 0 },
+			'/api/v1/history/device': { meta: [], data: [], rows: 0 }
+		}
 	}
 ] satisfies Story[];

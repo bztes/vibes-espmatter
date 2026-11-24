@@ -1,3 +1,4 @@
+import { formatDuration } from '#sdk/device-ui';
 import { DoorLock, FanControl, Thermostat } from '#sdk/matter';
 import { format, stepOf, type Point, type Series } from './sources';
 
@@ -78,4 +79,48 @@ export function span(points: Point[], from: number, to: number): number {
 	if (!points.length) return 0;
 	const end = Math.min(to, points[points.length - 1].t + stepOf(points));
 	return Math.max(0, end - Math.max(from, points[0].t));
+}
+
+interface Stat {
+	label: string;
+	/** None: no points. */
+	value?: string;
+	/** The one a small chart shows. */
+	main?: boolean;
+}
+
+/** Besides "now": what makes sense for the kind of value. */
+export function stats(series: Series, points: Point[], from: number, to: number): Stat[] {
+	const has = points.length > 0;
+	const show = (v: number, ok = true) => (has && ok ? format(v, series.unit) : undefined);
+	if (series.kind === 'counter') {
+		const inc = increase(points);
+		const days = span(points, from, to) / 86400;
+		return [
+			{ label: 'Increase', value: show(inc), main: true },
+			{ label: 'Per day', value: show(inc / days, days > 0) }
+		];
+	}
+	if (series.kind === 'state') {
+		const states = timeInStates(points, from, to);
+		const total = states.reduce((a, s) => a + s.seconds, 0);
+		return states.slice(0, 3).map(({ value, seconds }, i) => ({
+			label: valueText(series, value),
+			main: i === 0,
+			value: `${formatDuration(seconds)} · ${Math.round((seconds / total) * 100)} %`
+		}));
+	}
+	let min = Infinity;
+	let max = -Infinity;
+	let sum = 0;
+	for (const p of points) {
+		min = Math.min(min, p.min);
+		max = Math.max(max, p.max);
+		sum += p.avg;
+	}
+	return [
+		{ label: 'Minimum', value: show(min) },
+		{ label: 'Average', value: show(sum / points.length), main: true },
+		{ label: 'Maximum', value: show(max) }
+	];
 }

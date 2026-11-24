@@ -1,25 +1,18 @@
-<!-- The history page: pick a device, a value and a time range – one toolbar above the chart. -->
+<!-- The history page: the device's name opens the list of devices; `?device=` picks one. -->
 <script lang="ts">
-	import Cpu from '@lucide/svelte/icons/cpu';
-	import { Select, Stored, route } from '#sdk/device-ui';
+	import Check from '@lucide/svelte/icons/check';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import { Badge, Popover, Stored, route } from '#sdk/device-ui';
 	import HistoryView from './HistoryView.svelte';
 	import { catalog, loadCatalog } from './catalog.svelte';
-	import { seriesKey, valueKey } from './sources';
 
 	$effect(() => void loadCatalog());
 
 	const chosen = new Stored('espm.history.device');
-
-	// `#/history?device=<id>&metric=…&labels=…` (a value on a card) picks the device and the value.
+	// `#/history?device=<id>` (from a value's popup) picks the device.
 	const linked = route.query.get('device');
 	if (linked) {
 		chosen.value = linked;
-		const metric = route.query.get('metric');
-		if (metric)
-			new Stored(valueKey(linked)).value = seriesKey({
-				metric,
-				labels: route.query.get('labels') ?? ''
-			});
 		route.clearQuery();
 	}
 
@@ -31,31 +24,55 @@
 	);
 	// A device that no longer has a history falls back to the first one.
 	const device = $derived(devices.find((d) => d.id === chosen.value) ?? devices[0]);
-	const groups = $derived([
-		{
-			label: '',
-			options: devices.map((d) => ({
-				value: d.id,
-				label: d.name,
-				meta: [
-					...(d.own ? ['this device'] : []),
-					`${d.series.length} ${d.series.length === 1 ? 'value' : 'values'}`
-				]
-			}))
-		}
-	]);
+
+	let open = $state(false);
+	let anchor = $state<HTMLElement>();
+
+	function pick(id: string) {
+		chosen.value = id;
+		open = false;
+	}
 </script>
 
-<!-- The chosen value stays when the other device has it too. -->
-<HistoryView device={device?.id}>
-	{#snippet picker()}
-		<Select
-			bind:value={() => device?.id, (v) => (chosen.value = v ?? '')}
-			{groups}
-			aria-label="Device"
-			title="Device"
+{#snippet picker(name: string)}
+	<div class="-ml-2 flex min-w-0" bind:this={anchor}>
+		<button
+			type="button"
+			class={[
+				'flex max-w-full cursor-pointer items-center gap-1.5 rounded-lg px-2 font-semibold text-fg hover:bg-surface-2',
+				open && 'bg-surface-2'
+			]}
+			aria-haspopup="menu"
+			aria-expanded={open}
+			onclick={() => (open = !open)}
 		>
-			{#snippet icon()}<Cpu size={16} />{/snippet}
-		</Select>
-	{/snippet}
-</HistoryView>
+			<span class="truncate">{name}</span>
+			<ChevronDown size={14} class="shrink-0 text-muted" />
+		</button>
+	</div>
+	<Popover bind:open {anchor} title="Device" class="w-72 p-1">
+		<div role="menu" class="grid gap-0.5">
+			{#each devices as d (d.id)}
+				{@const here = d === device}
+				<button
+					type="button"
+					role="menuitem"
+					class={[
+						'flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm',
+						here ? 'bg-accent-soft text-accent' : 'text-fg hover:bg-surface-2'
+					]}
+					onclick={() => pick(d.id)}
+				>
+					<span class="min-w-0 flex-1 truncate">{d.name}</span>
+					{#if d.own}<Badge class="px-1.5 py-px text-[11px] font-normal">this device</Badge>{/if}
+					<span class="shrink-0 text-xs text-muted"
+						>{d.series.length} {d.series.length === 1 ? 'value' : 'values'}</span
+					>
+					{#if here}<Check size={14} class="shrink-0" />{/if}
+				</button>
+			{/each}
+		</div>
+	</Popover>
+{/snippet}
+
+<HistoryView device={device?.id} title={devices.length > 1 ? picker : undefined} />

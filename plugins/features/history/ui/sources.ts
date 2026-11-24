@@ -1,8 +1,8 @@
 import { formatBytes, formatDuration, formatNumber } from '#sdk/device-ui';
 
 /**
- * The firmware passes the database's answer through unchanged: one parser per source turns it into
- * points. A new source needs a query in the firmware and a parser here.
+ * The firmware passes the database's answer through unchanged: one reader per source turns it into
+ * rows. A new source needs its queries in the firmware and a reader here.
  */
 
 /** A bucket: average, minimum, maximum and last of the values in it. `t` in unix seconds. */
@@ -41,8 +41,6 @@ export interface Catalog {
 }
 
 export const seriesKey = (s: Pick<Series, 'metric' | 'labels'>) => `${s.metric}|${s.labels}`;
-/** Where the picked value of a device is remembered. */
-export const valueKey = (device: string) => `espm.history.value.${device}`;
 export const isDiagnostic = (s: Series) => s.metric.startsWith('device.');
 
 const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN);
@@ -61,25 +59,51 @@ function points(rows: unknown[][]): Point[] {
 		.sort((a, b) => a.t - b.t);
 }
 
-const PARSERS: Record<string, (raw: unknown) => Point[]> = {
-	/** FORMAT JSONCompact: `{ data: [[t, avg, min, max, last], …] }` (nan/inf as null). */
+/** The rows of the database's answer. */
+const ROWS: Record<string, (raw: unknown) => unknown[][]> = {
+	/** FORMAT JSONCompact: `{ data: [[…], …] }` (nan/inf as null). */
 	clickhouse(raw) {
 		const data = (raw as { data?: unknown })?.data;
 		if (!Array.isArray(data)) throw new Error('Unexpected answer from ClickHouse');
-		return points(data.filter(Array.isArray));
+		return data.filter(Array.isArray);
 	}
 };
 
+function rows(source: string, raw: unknown): unknown[][] {
+	const read = ROWS[source];
+	if (!read) throw new Error(`Unknown history source "${source}"`);
+	return read(raw);
+}
+
+/** One series: rows of `[t, avg, min, max, last]`. */
 export function parse(source: string, raw: unknown): Point[] {
-	const parser = PARSERS[source];
-	if (!parser) throw new Error(`Unknown history source "${source}"`);
-	return parser(raw);
+	return points(rows(source, raw));
+}
+
+/** All values of a device: rows of `[key, t, avg, min, max, last]`, by series key. */
+export function parseDevice(source: string, raw: unknown): Map<string, Point[]> {
+	const by = new Map<string, unknown[][]>();
+	for (const [key, ...rest] of rows(source, raw)) {
+		if (typeof key !== 'string') continue;
+		(by.get(key) ?? by.set(key, []).get(key)!).push(rest);
+	}
+	return new Map([...by].map(([key, r]) => [key, points(r)]));
 }
 
 /** Readable metric name: `thermostat_local_temperature` → `Thermostat local temperature`. */
 export function metricLabel(metric: string): string {
 	const words = metric.replace(/^device\./, '').replace(/[._]+/g, ' ');
 	return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Names of a device's values; the endpoint only where a metric is there twice. */
+export function seriesLabels(all: Series[]): (s: Series) => string {
+	const count: Record<string, number> = {};
+	for (const s of all) count[s.metric] = (count[s.metric] ?? 0) + 1;
+	return (s) => {
+		const ep = /(?:^|,)endpoint=(\d+)/.exec(s.labels)?.[1];
+		return metricLabel(s.metric) + (ep && count[s.metric] > 1 ? ` (endpoint ${ep})` : '');
+	};
 }
 
 /** Unit as shown (UCUM codes of the exporter); `''` for none. */
