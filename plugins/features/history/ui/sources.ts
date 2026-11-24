@@ -40,7 +40,9 @@ export interface Catalog {
 	devices: Device[];
 }
 
-export const seriesKey = (s: Series) => `${s.metric}|${s.labels}`;
+export const seriesKey = (s: Pick<Series, 'metric' | 'labels'>) => `${s.metric}|${s.labels}`;
+/** Where the picked value of a device is remembered. */
+export const valueKey = (device: string) => `espm.history.value.${device}`;
 export const isDiagnostic = (s: Series) => s.metric.startsWith('device.');
 
 const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN);

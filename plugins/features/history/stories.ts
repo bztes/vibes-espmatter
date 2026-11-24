@@ -1,7 +1,7 @@
-import type { SpotStory, Story } from '#sdk/device-ui';
-import HistoryDeviceIcon from './ui/HistoryDeviceIcon.svelte';
+import type { Story, ValueTargetStory } from '#sdk/device-ui';
 import HistoryPage from './ui/HistoryPage.svelte';
 import HistoryView from './ui/HistoryView.svelte';
+import target from './ui/value-target';
 
 const series = {
 	source: 'clickhouse',
@@ -34,6 +34,16 @@ const series = {
 			series: [
 				{ metric: 'on_off', labels: 'endpoint=1', unit: '1', value: 1, kind: 'state' },
 				{ metric: 'energy', labels: 'endpoint=1', unit: 'kWh', value: 412.6, kind: 'counter' }
+			]
+		},
+		{
+			id: 'a1b2c3d4/node-25',
+			name: 'Washing machine',
+			own: false,
+			node: '25',
+			series: [
+				{ metric: 'power', labels: 'endpoint=1', unit: 'W', value: 412.6, kind: 'gauge' },
+				{ metric: 'energy', labels: 'endpoint=1', unit: 'kWh', value: 183.42, kind: 'counter' }
 			]
 		}
 	]
@@ -75,6 +85,13 @@ const onOff = hourly((t) => {
 	const h = hourOf(t);
 	const on = h >= 18 && h <= 22 ? 1 : h === 17 ? 0.5 : 0;
 	return [on, on === 1 ? 1 : 0, on > 0 ? 1 : 0, on > 0 ? 1 : 0];
+});
+
+/** A washing machine running in the evening. */
+const power = hourly((t) => {
+	const h = hourOf(t);
+	const avg = h >= 18 && h <= 20 ? 420 : 1.5;
+	return [avg, 1.2, avg > 2 ? 2100 : 1.8, avg].map(round);
 });
 
 /** Seconds since boot, with two reboots. */
@@ -120,6 +137,7 @@ const history = (url: URL) => {
 		on_off: onOff,
 		'device.online': onOff,
 		energy,
+		power,
 		'device.uptime': uptime,
 		'device.memory.free': memoryFree
 	};
@@ -128,10 +146,8 @@ const history = (url: URL) => {
 
 const api = { '/api/v1/history/series': series, '/api/v1/history': history };
 
-/** The chart icon on device cards in the other previews. */
-export const spotStories: SpotStory[] = [
-	{ spot: 'device-icons', component: HistoryDeviceIcon, api }
-];
+/** Values with a history link to it in the other previews. */
+export const valueTargetStories: ValueTargetStory[] = [{ target, api }];
 
 export default [
 	{ name: 'History', component: HistoryPage, page: 'history', wide: true, plain: true, api }

@@ -24,15 +24,18 @@
 {#if system.current}
 	{@const s = system.current}
 	<div class="grid">
-		<Row label="Uptime">{formatDuration(s.uptime)}</Row>
+		<Row label="Uptime" ref={{ own: true, metric: 'device.uptime' }}>{formatDuration(s.uptime)}</Row
+		>
 		<Row label="Last reset">{s.resetReason}</Row>
-		<Row label="Free memory"
+		<Row label="Free memory" ref={{ own: true, metric: 'device.memory.free' }}
 			>{formatBytes(s.heap.free)}
 			<span class="text-muted">(min {formatBytes(s.heap.min)})</span></Row
 		>
 		{#if s.psram.free}<Row label="Free PSRAM">{formatBytes(s.psram.free)}</Row>{/if}
 		<Row label="IP address"><span class="font-mono">{s.network.ip || '–'}</span></Row>
-		{#if s.network.rssi !== undefined}<Row label="Signal">{s.network.rssi} dBm</Row>{/if}
+		{#if s.network.rssi !== undefined}
+			<Row label="Signal" ref={{ own: true, metric: 'device.wifi.rssi' }}>{s.network.rssi} dBm</Row>
+		{/if}
 	</div>
 {:else if system.error}
 	<p class="text-sm text-err">{system.error}</p>

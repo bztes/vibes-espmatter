@@ -26,8 +26,17 @@ export {
 	type SpotName,
 	type Spots,
 	type DeviceContext,
+	type DeviceRef,
 	type SpotItem
 } from './spots.svelte';
+export { default as ValueLink } from './ValueLink.svelte';
+export {
+	registerValueTargets,
+	type ValueRef,
+	type ValueSeries,
+	type ValueTarget,
+	type ValueLinkTarget
+} from './values.svelte';
 export {
 	api,
 	ApiError,
@@ -44,4 +53,4 @@ export { Stored } from './stored.svelte';
 export { cardHeader, provideCardHeader } from './card-header.svelte';
 export { session } from './session.svelte';
 export { route } from './route.svelte';
-export type { SpotStory, Story } from './story';
+export type { SpotStory, Story, ValueTargetStory } from './story';

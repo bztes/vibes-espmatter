@@ -1,11 +1,14 @@
 <!-- Thermostat cluster (0x0201): room temperature, setpoint, system mode. -->
 <script lang="ts">
-	import { Button, Segmented, Stat } from '#sdk/device-ui';
+	import { Button, Segmented, Stat, ValueLink } from '#sdk/device-ui';
 	import { ACTIONS, send } from '../actions';
 	import { CLUSTER, SYSTEM_MODES, hasCluster, systemModes } from '../matter';
+	import { valueRef } from '.';
 	import type { ClusterProps } from './types';
 
 	let { node, ep, disabled = false, run }: ClusterProps = $props();
+
+	const value = (metric: string, label: string) => valueRef(node, ep, metric, label);
 
 	const modes = $derived.by(() => {
 		const offered = systemModes(ep);
@@ -53,7 +56,12 @@
 				{target.toFixed(1)}<span class="text-2xl font-normal text-muted">°</span>
 			</div>
 			{#if ep.outdoorTemperature != null}
-				<div class="text-xs text-muted">Outside {ep.outdoorTemperature.toFixed(1)} °C</div>
+				<ValueLink
+					ref={value('thermostat_outdoor_temperature', 'Outside')}
+					class="rounded text-xs text-muted"
+				>
+					Outside {ep.outdoorTemperature.toFixed(1)} °C
+				</ValueLink>
 			{/if}
 		</div>
 		<Button
@@ -66,9 +74,13 @@
 	</div>
 {:else}
 	<div class="flex flex-wrap gap-x-6 gap-y-2">
-		<Stat label="Room" value={ep.localTemperature?.toFixed(1)} unit="°C" />
+		<ValueLink ref={value('thermostat_local_temperature', 'Room')} class="rounded">
+			<Stat label="Room" value={ep.localTemperature?.toFixed(1)} unit="°C" />
+		</ValueLink>
 		{#if ep.outdoorTemperature != null}
-			<Stat label="Outside" value={ep.outdoorTemperature.toFixed(1)} unit="°C" />
+			<ValueLink ref={value('thermostat_outdoor_temperature', 'Outside')} class="rounded">
+				<Stat label="Outside" value={ep.outdoorTemperature.toFixed(1)} unit="°C" />
+			</ValueLink>
 		{/if}
 	</div>
 {/if}

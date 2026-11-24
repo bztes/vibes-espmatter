@@ -95,15 +95,13 @@ describe('hub', () => {
 		expect(main.files['main/app_main.cpp']).toContain('espm_time_sync(ESPM_CTRL_NTP);');
 	});
 
-	it('puts spot items of plugins into the web interface', () => {
+	it('puts value targets of plugins into the web interface', () => {
 		const hub = createConfig('hub', 'Hub');
 		enableFeature(hub, 'history');
 		const a = assemble(hub, { version: 1, buildId: 'b1' });
-		expect(a.spotItems.map((x) => [x.spot, x.file])).toEqual([
-			['device-icons', 'HistoryDeviceIcon.svelte']
-		]);
-		expect(uiSpec(a).spotItems).toEqual([
-			{ spot: 'device-icons', module: 'plugins/features/history/ui/HistoryDeviceIcon.svelte' }
+		expect(a.valueTargets.map((x) => x.file)).toEqual(['value-target.ts']);
+		expect(uiSpec(a).valueTargets).toEqual([
+			{ module: 'plugins/features/history/ui/value-target.ts' }
 		]);
 	});
 

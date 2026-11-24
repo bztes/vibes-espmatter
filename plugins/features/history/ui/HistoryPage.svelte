@@ -4,15 +4,22 @@
 	import { Select, Stored, route } from '#sdk/device-ui';
 	import HistoryView from './HistoryView.svelte';
 	import { catalog, loadCatalog } from './catalog.svelte';
+	import { seriesKey, valueKey } from './sources';
 
 	$effect(() => void loadCatalog());
 
 	const chosen = new Stored('espm.history.device');
 
-	// `#/history?device=<id>` (a card's chart icon) picks the device.
+	// `#/history?device=<id>&metric=…&labels=…` (a value on a card) picks the device and the value.
 	const linked = route.query.get('device');
 	if (linked) {
 		chosen.value = linked;
+		const metric = route.query.get('metric');
+		if (metric)
+			new Stored(valueKey(linked)).value = seriesKey({
+				metric,
+				labels: route.query.get('labels') ?? ''
+			});
 		route.clearQuery();
 	}
 

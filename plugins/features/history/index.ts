@@ -8,7 +8,7 @@ export default defineFeature({
 	id: 'history',
 	name: 'History',
 	description:
-		'Charts of past values – days, weeks, years – of this device and its paired devices, behind a chart icon on their cards. Read from the database the OpenTelemetry collector writes to.',
+		'Charts of past values – days, weeks, years – of this device and its paired devices, opened by clicking a value on their cards. Read from the database the OpenTelemetry collector writes to.',
 	icon: 'chart-line',
 	kinds: ['hub', 'device'],
 	needs: ['ip'],
@@ -139,7 +139,7 @@ export default defineFeature({
 				response: { data: [[1763020800, 21.2, 20.9, 21.6, 21.4]] }
 			}
 		);
-		out.spot({ spot: 'device-icons', file: 'HistoryDeviceIcon.svelte' });
+		out.valueTarget({ file: 'value-target.ts' });
 		// A page of its own: any device and value with a history, picked by the user.
 		out.page({ id: 'history', title: 'History', icon: 'chart-line', path: '/history', order: 3 });
 		out.ui({

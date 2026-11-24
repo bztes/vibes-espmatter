@@ -1,13 +1,15 @@
 /**
  * Widget previews for /dev/ui: every `stories.ts` of a plugin (and the platform), keyed by folder.
  */
-import type { SpotStory, Story } from '#sdk/device-ui';
+import type { SpotStory, Story, ValueTargetStory } from '#sdk/device-ui';
 
 const modules = Object.entries(
-	import.meta.glob<{ default: Story[]; parts?: Story[]; spotStories?: SpotStory[] }>(
-		['/plugins/**/stories.ts', '/src/lib/core/platform/stories.ts'],
-		{ eager: true }
-	)
+	import.meta.glob<{
+		default: Story[];
+		parts?: Story[];
+		spotStories?: SpotStory[];
+		valueTargetStories?: ValueTargetStory[];
+	}>(['/plugins/**/stories.ts', '/src/lib/core/platform/stories.ts'], { eager: true })
 )
 	.map(
 		([file, m]) =>
@@ -24,6 +26,11 @@ export const widgetStories: Story[] = modules.flatMap(([, m]) => m.default);
 
 /** What the plugins put into spots (`export const spotStories` of a `stories.ts`), on every preview. */
 export const spotStories: SpotStory[] = modules.flatMap(([, m]) => m.spotStories ?? []);
+
+/** What the plugins open for values (`export const valueTargetStories`), on every preview. */
+export const valueTargetStories: ValueTargetStory[] = modules.flatMap(
+	([, m]) => m.valueTargetStories ?? []
+);
 
 /** Answer `/api/…` from the current story instead of the network. */
 export function mockFetch(routes: () => Record<string, unknown>) {

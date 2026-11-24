@@ -13,6 +13,7 @@ import type {
 	DefineValue,
 	UiPage,
 	UiSpotItem,
+	UiValueTarget,
 	UiWidget,
 	Wire
 } from '#sdk';
@@ -37,6 +38,7 @@ export interface SlotFirmware extends Omit<FirmwareContribution, 'sources'> {
 type Placed<T> = T & { dir: string; by: string };
 export type PlacedWidget = Placed<UiWidget>;
 export type PlacedSpotItem = Placed<UiSpotItem>;
+export type PlacedValueTarget = Placed<UiValueTarget>;
 
 const byOrder = (a: { order?: number }, b: { order?: number }) => (a.order ?? 50) - (b.order ?? 50);
 
@@ -46,6 +48,7 @@ export interface Assembly {
 	api: ApiRoute[];
 	widgets: PlacedWidget[];
 	spotItems: PlacedSpotItem[];
+	valueTargets: PlacedValueTarget[];
 	pages: (UiPage & { by: string })[];
 	parts: PartDef[];
 	wires: Wire[];
@@ -91,6 +94,7 @@ export function assemble(config: FirmwareConfig, build?: BuildInfo): Assembly {
 		api: [],
 		widgets: [],
 		spotItems: [],
+		valueTargets: [],
 		pages: [],
 		parts: [],
 		wires: [],
@@ -160,6 +164,10 @@ export function assemble(config: FirmwareConfig, build?: BuildInfo): Assembly {
 			spot: (...items) => {
 				if (peripheral) throw noPeripheralUi(name);
 				out.spotItems.push(...items.map((a) => ({ ...a, dir, by: name })));
+			},
+			valueTarget: (...targets) => {
+				if (peripheral) throw noPeripheralUi(name);
+				out.valueTargets.push(...targets.map((t) => ({ ...t, dir, by: name })));
 			},
 			page: (page) => {
 				if (peripheral) throw noPeripheralUi(name);

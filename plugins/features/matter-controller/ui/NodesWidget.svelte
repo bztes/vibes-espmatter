@@ -14,8 +14,9 @@
 	import ThermometerSun from '@lucide/svelte/icons/thermometer-sun';
 	import WifiOff from '@lucide/svelte/icons/wifi-off';
 	import type { Component } from 'svelte';
-	import { Spot, Poll, Segmented, Stat, Stored, Toggle, errorText, session } from '#sdk/device-ui';
+	import { Spot, Poll, Segmented, Stored, Toggle, errorText, session } from '#sdk/device-ui';
 	import EndpointControls from './EndpointControls.svelte';
+	import ReadingTile from './ReadingTile.svelte';
 	import {
 		controllableEndpoints,
 		controlsOf,
@@ -226,9 +227,7 @@
 			<div class="grid grid-cols-2 gap-2">
 				{#each sensors as ep (ep.id)}
 					{#each readingsOf(ep) as r (r.cluster)}
-						<div class="min-w-0 rounded-xl bg-surface-2 px-3 py-2">
-							<Stat label={r.label(ep)} value={r.value(ep)} unit={r.unit} tone={r.tone?.(ep)} />
-						</div>
+						<ReadingTile node={node.id} {ep} reading={r} />
 					{/each}
 				{/each}
 			</div>

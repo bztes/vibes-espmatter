@@ -6,8 +6,8 @@ export interface Spots {
 	'device-icons': DeviceContext;
 }
 /** This device itself (`own`), or a paired device by its Matter node id. */
-export type DeviceContext =
-	{ own: true; node?: undefined; name: string } | { own?: false; node: number; name: string };
+export type DeviceRef = { own: true; node?: undefined } | { own?: false; node: number };
+export type DeviceContext = DeviceRef & { name: string };
 
 export type SpotName = keyof Spots;
 

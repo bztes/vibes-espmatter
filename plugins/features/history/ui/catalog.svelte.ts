@@ -3,7 +3,7 @@ import type { Catalog } from './sources';
 
 const MAX_AGE_MS = 60000;
 
-/** What has a history, shared by the page and the chart icons. `null`: no history on this device. */
+/** What has a history, shared by the page and the value links on cards. `null`: no history on this device. */
 export const catalog = $state<{ current?: Catalog | null; error?: string }>({});
 
 let loaded = 0;

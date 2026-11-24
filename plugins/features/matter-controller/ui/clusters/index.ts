@@ -7,6 +7,7 @@
  * `ATTRS` in the hub firmware so the hub reports them.
  */
 import type { Component } from 'svelte';
+import type { ValueRef } from '#sdk/device-ui';
 import { DEVICE_TYPE, isUtility } from '#sdk/matter';
 import { CLUSTER, clustersOf, is, type Endpoint, type Node } from '../matter';
 import ColorControl from './ColorControl.svelte';
@@ -32,11 +33,21 @@ export const CONTROLS: { cluster: number; component: Component<ClusterProps> }[]
 
 export interface Reading {
 	cluster: number;
+	/** Telemetry name the hub reports it under (`ATTRS` in the hub firmware). */
+	metric: string;
 	label: (ep: Endpoint) => string;
 	value: (ep: Endpoint) => string | undefined;
 	unit?: string;
 	tone?: (ep: Endpoint) => 'default' | 'warn' | 'accent';
 }
+
+/** A value of an endpoint of a paired device, for `ValueLink`. */
+export const valueRef = (node: number, ep: Endpoint, metric: string, label: string): ValueRef => ({
+	node,
+	metric,
+	labels: `endpoint=${ep.id}`,
+	label
+});
 
 const fixed = (v: number | null | undefined, digits: number) =>
 	v == null ? undefined : v.toFixed(digits);
@@ -52,30 +63,35 @@ const booleanState = (ep: Endpoint) => {
 export const READINGS: Reading[] = [
 	{
 		cluster: CLUSTER.temperatureMeasurement,
+		metric: 'temperature',
 		label: () => 'Temperature',
 		value: (ep) => fixed(ep.temperature, 1),
 		unit: '°C'
 	},
 	{
 		cluster: CLUSTER.relativeHumidityMeasurement,
+		metric: 'humidity',
 		label: () => 'Humidity',
 		value: (ep) => fixed(ep.humidity, 0),
 		unit: '%'
 	},
 	{
 		cluster: CLUSTER.illuminanceMeasurement,
+		metric: 'illuminance',
 		label: () => 'Light',
 		value: (ep) => fixed(ep.illuminance, 0),
 		unit: 'lx'
 	},
 	{
 		cluster: CLUSTER.pressureMeasurement,
+		metric: 'pressure',
 		label: () => 'Pressure',
 		value: (ep) => fixed(ep.pressure, 0),
 		unit: 'hPa'
 	},
 	{
 		cluster: CLUSTER.electricalPowerMeasurement,
+		metric: 'power',
 		label: () => 'Power',
 		value: (ep) =>
 			ep.power == null ? undefined : fixed(ep.power, Math.abs(ep.power) < 10 ? 1 : 0),
@@ -83,12 +99,14 @@ export const READINGS: Reading[] = [
 	},
 	{
 		cluster: CLUSTER.electricalEnergyMeasurement,
+		metric: 'energy',
 		label: () => 'Energy',
 		value: (ep) => (ep.energy == null ? undefined : fixed(ep.energy, ep.energy < 100 ? 2 : 1)),
 		unit: 'kWh'
 	},
 	{
 		cluster: CLUSTER.booleanState,
+		metric: 'boolean_state',
 		label: (ep) =>
 			is(ep, DEVICE_TYPE.contactSensor)
 				? 'Contact'
@@ -100,6 +118,7 @@ export const READINGS: Reading[] = [
 	},
 	{
 		cluster: CLUSTER.occupancySensing,
+		metric: 'occupancy',
 		label: () => 'Occupancy',
 		value: (ep) => (ep.occupied == null ? undefined : ep.occupied ? 'Occupied' : 'Clear'),
 		tone: (ep) => (ep.occupied ? 'accent' : 'default')

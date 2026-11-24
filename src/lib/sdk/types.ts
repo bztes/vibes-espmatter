@@ -333,6 +333,15 @@ export interface UiSpotItem {
 	order?: number;
 }
 
+/**
+ * What a plugin opens when a value on a card is clicked (`ValueLink` of `#sdk/device-ui`): a module
+ * whose default export is a `ValueTarget`. The first plugin with an answer for a value wins.
+ */
+export interface UiValueTarget {
+	/** File name inside `<plugin>/ui/`. */
+	file: string;
+}
+
 /** A page of the device web interface (provided by features). */
 export interface UiPage {
 	id: string;
@@ -463,6 +472,8 @@ export interface Contributor {
 	ui(...widgets: UiWidget[]): void;
 	/** Features only: components in spots of other widgets. */
 	spot(...items: UiSpotItem[]): void;
+	/** Features only: what clicks on values in other widgets open. */
+	valueTarget(...targets: UiValueTarget[]): void;
 	/** Features only. */
 	page(page: UiPage): void;
 	part(part: PartDef): void;

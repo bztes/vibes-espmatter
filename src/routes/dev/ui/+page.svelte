@@ -9,8 +9,14 @@
 	import Card from '#lib/device-ui/Card.svelte';
 	import { Code, CodeBlock } from '#lib/ui/index.ts';
 	import Shell from '#lib/device-ui/Shell.svelte';
-	import { registerSpotItems } from '#sdk/device-ui';
-	import { spotStories, mockFetch, stories, widgetStories } from '#lib/device-ui/stories.ts';
+	import { registerSpotItems, registerValueTargets } from '#sdk/device-ui';
+	import {
+		spotStories,
+		valueTargetStories,
+		mockFetch,
+		stories,
+		widgetStories
+	} from '#lib/device-ui/stories.ts';
 	import type { ShellWidget } from '#lib/device-ui/types.ts';
 
 	const key = $derived(page.url.searchParams.get('story') ?? '');
@@ -24,8 +30,11 @@
 	const all = widgetStories.filter(
 		(s, i) => widgetStories.findIndex((o) => o.component === s.component) === i
 	);
-	/** What the spot items fetch, under every story's own answers. */
-	const spotApi = Object.assign({}, ...spotStories.map((a) => a.api ?? {}));
+	/** What the spot items and value targets fetch, under every story's own answers. */
+	const spotApi = Object.assign(
+		{},
+		...[...spotStories, ...valueTargetStories].map((a) => a.api ?? {})
+	);
 	const merged = Object.assign(
 		{},
 		spotApi,
@@ -46,6 +55,7 @@
 	// Installed right away (not in an effect): widgets start fetching in their own effects, which run first.
 	mockFetch(() => (shell ? merged : { ...spotApi, ...story?.api }));
 	registerSpotItems(spotStories);
+	registerValueTargets(valueTargetStories.map((s) => s.target));
 	const link = (dir: string, name: string) =>
 		`${resolve('/dev/ui')}?story=${encodeURIComponent(`${dir}/${name}`)}`;
 </script>

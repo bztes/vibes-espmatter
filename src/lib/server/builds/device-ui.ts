@@ -26,6 +26,7 @@ export interface UiSpec {
 		module: string;
 	}[];
 	spotItems: { spot: string; module: string }[];
+	valueTargets: { module: string }[];
 }
 
 export function uiSpec(a: Assembly): UiSpec {
@@ -42,12 +43,13 @@ export function uiSpec(a: Assembly): UiSpec {
 			props: w.props ?? {},
 			module: `${w.dir}/ui/${w.file}`
 		})),
-		spotItems: a.spotItems.map((x) => ({ spot: x.spot, module: `${x.dir}/ui/${x.file}` }))
+		spotItems: a.spotItems.map((x) => ({ spot: x.spot, module: `${x.dir}/ui/${x.file}` })),
+		valueTargets: a.valueTargets.map((x) => ({ module: `${x.dir}/ui/${x.file}` }))
 	};
 }
 
-/** Every component the plugins contribute: widgets and spot items. */
-const parts = (spec: UiSpec) => [...spec.widgets, ...spec.spotItems];
+/** Every module the plugins contribute: widgets, spot items and value targets. */
+const parts = (spec: UiSpec) => [...spec.widgets, ...spec.spotItems, ...spec.valueTargets];
 
 function entry(spec: UiSpec): string {
 	const modules = [...new Set(parts(spec).map((p) => p.module))];
@@ -60,13 +62,15 @@ function entry(spec: UiSpec): string {
 import { mount } from 'svelte';
 import './main.css';
 import Shell from './src/lib/device-ui/Shell.svelte';
-import { registerSpotItems } from './src/lib/sdk/device-ui/index.ts';
+import { registerSpotItems, registerValueTargets } from './src/lib/sdk/device-ui/index.ts';
 ${modules.map((m) => `import ${mod(m)} from './${m}';`).join('\n')}
 ${icons.map((i) => `import ${icon(i)} from '@lucide/svelte/icons/${i}';`).join('\n')}
 
 registerSpotItems([
 ${spec.spotItems.map(({ module, spot }) => `\t{ spot: ${JSON.stringify(spot)}, component: ${mod(module)} }`).join(',\n')}
 ]);
+
+registerValueTargets([${spec.valueTargets.map(({ module }) => mod(module)).join(', ')}]);
 
 mount(Shell, {
 	target: document.getElementById('app'),

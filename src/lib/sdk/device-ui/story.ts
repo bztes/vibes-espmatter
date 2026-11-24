@@ -1,5 +1,6 @@
 import type { Component } from 'svelte';
 import type { SpotItem } from './spots.svelte';
+import type { ValueTarget } from './values.svelte';
 
 /**
  * A widget preview for /dev/ui: `stories.ts` in a plugin folder exports `Story[]` as default (also
@@ -25,5 +26,11 @@ export interface Story {
 
 /** A spot item on every preview (`export const spotStories` of a `stories.ts`), with its mocked API. */
 export interface SpotStory extends SpotItem {
+	api?: Record<string, unknown>;
+}
+
+/** A value target on every preview (`export const valueTargetStories` of a `stories.ts`), with its mocked API. */
+export interface ValueTargetStory {
+	target: ValueTarget;
 	api?: Record<string, unknown>;
 }

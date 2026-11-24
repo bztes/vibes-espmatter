@@ -22,6 +22,7 @@
 		metricLabel,
 		parse,
 		seriesKey,
+		valueKey,
 		type Point,
 		type Series
 	} from './sources';
@@ -44,7 +45,7 @@
 	});
 
 	// The picked value, remembered per device.
-	const chosen = $derived(new Stored(`espm.history.value.${id ?? ''}`));
+	const chosen = $derived(new Stored(valueKey(id ?? '')));
 	// Presets are remembered; a stepped, zoomed or custom range only for this visit.
 	const preset = new Stored('espm.history.range', 'today', isPreset);
 	let view = $state<View>(presetView(preset.value));
