@@ -35,7 +35,9 @@ COPY --from=build /app/drizzle ./drizzle
 
 ENV NODE_ENV=production \
 	HOST=0.0.0.0 \
-	PORT=3000
+	PORT=3000 \
+	DATA_DIR=/data
+VOLUME /data
 EXPOSE 3000
 # Polls /health (src/routes/health/+server.ts); node, as the slim image has neither curl nor wget.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
