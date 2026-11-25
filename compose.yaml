@@ -1,0 +1,15 @@
+# Settings go into a .env file next to this file, see .env.example.
+
+services:
+  espmatter:
+    image: ghcr.io/bztes/vibes-espmatter:latest
+    restart: unless-stopped
+    environment:
+      - ORIGIN
+      - ADDRESS_HEADER
+      - XFF_DEPTH
+    ports:
+      - '3000:3000'
+    volumes:
+      # Persistent Espmatter state: the SQLite database (app.db) and firmware artifacts
+      - ${DATA_DIR:-./data}:/data

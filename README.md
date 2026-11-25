@@ -4,21 +4,7 @@ Configure, build and flash ESP32 firmware for Matter hubs and devices from the b
 
 ## Setup
 
-Create a `docker-compose.yaml`:
-
-```yaml
-services:
-  app:
-    image: ghcr.io/bztes/vibes-espmatter:latest
-    ports: ['3000:3000']
-    environment:
-      DATA_DIR: /data
-    volumes:
-      - ./data:/data
-    restart: unless-stopped
-```
-
-Start it with `docker compose up -d` and open http://localhost:3000.
+Download [compose.yaml](compose.yaml) and [.env.example](.env.example) as `.env` next to it (all options are described there), then start it with `docker compose up -d` and open http://localhost:3000.
 
 The first account you create is the admin. Under **Admin**, set the public URL that devices use to reach the app.
 
