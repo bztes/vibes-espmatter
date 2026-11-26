@@ -1,5 +1,17 @@
 # vibes-espmatter
 
+## 0.8.0
+
+### Minor Changes
+
+- [`147be2a`](https://github.com/bztes/vibes-espmatter/commit/147be2a7dd78a8e0fad7df29ee03c2e1de78d32d) Thanks [@bztes](https://github.com/bztes)! - A settings page for every user: change the password and export or import the setup (locations, firmwares, devices); admins can do the latter for any user.
+
+### Patch Changes
+
+- [`ca653a5`](https://github.com/bztes/vibes-espmatter/commit/ca653a59a7a66d7fffe99fe99ffc5077760b931c) Thanks [@bztes](https://github.com/bztes)! - Store the data in the `/data` volume in docker
+
+- [`31ee672`](https://github.com/bztes/vibes-espmatter/commit/31ee6729e2a6f6163b295cbbbc77a2fd94313f79) Thanks [@bztes](https://github.com/bztes)! - Devices get their firmware updates over Matter from their hub – builds from the app for own devices, the makers' updates for all others; the hub's firmware carries the radio's.
+
 ## 0.7.0
 
 ### Minor Changes
