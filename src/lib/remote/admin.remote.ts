@@ -17,6 +17,7 @@ import {
 	waitForRunners
 } from '#lib/server/builds/runners.ts';
 import { getSetting, setSetting } from '#lib/server/settings.ts';
+import { exportSetup, importSetup } from '#lib/server/setup.ts';
 import { deviceDomain } from '#lib/server/tunnel/index.ts';
 import { getSignUp } from './auth.remote.ts';
 import { email, name, uuid } from './schemas.ts';
@@ -207,3 +208,22 @@ export const runnerStatus = query.live(async function* () {
 		await waitForRunners();
 	}
 });
+
+/** A user's locations, firmwares and devices, as a file to import elsewhere. */
+export const exportUserSetup = command(uuid, async (id) => {
+	requireAdmin();
+	return exportSetup(id);
+});
+
+/** Adds an exported setup to a user's account. */
+export const importUserSetup = command(
+	v.object({ id: uuid, setup: v.unknown() }),
+	async ({ id, setup }) => {
+		requireAdmin();
+		const [u] = await db.select({ id: user.id }).from(user).where(eq(user.id, id));
+		if (!u) error(404, 'No such user.');
+		const counts = await importSetup(id, setup);
+		void listUsers().refresh();
+		return counts;
+	}
+);

@@ -10,7 +10,9 @@
 		addRunner,
 		deleteRunner,
 		deleteUser,
+		exportUserSetup,
 		getServerSettings,
+		importUserSetup,
 		inviteUser,
 		listRunners,
 		listUsers,
@@ -35,6 +37,7 @@
 		Tabs,
 		Toggle
 	} from '#lib/ui/index.ts';
+	import { downloadSetup, importedText, pickSetupFile } from '#lib/ui/setup-file.ts';
 
 	const tab = $derived(page.url.searchParams.get('tab') ?? 'users');
 	const me = $derived(await getMe());
@@ -67,6 +70,21 @@
 			inviting = false;
 			invite = { name: '', email: '', role: 'user' };
 		}
+	}
+
+	// Setup export / import
+	let imported = $state('');
+	async function exportFor(u: { id: string; email: string }) {
+		const setup = await run(() => exportUserSetup(u.id));
+		if (setup) downloadSetup(setup, u.email);
+	}
+	async function importFor(u: { id: string; email: string }) {
+		imported = '';
+		const r = await run(async () => {
+			const setup = await pickSetupFile();
+			return setup === undefined ? undefined : importUserSetup({ id: u.id, setup });
+		});
+		if (r) imported = `${u.email}: ${importedText(r)}`;
 	}
 
 	// Settings
@@ -121,6 +139,7 @@
 
 <div class="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6">
 	{#if error}<Notice tone="err">{error}</Notice>{/if}
+	{#if imported}<Notice tone="ok">{imported}</Notice>{/if}
 	{#if secret}
 		<Notice tone="ok">
 			<div class="flex flex-wrap items-center gap-2">
@@ -144,7 +163,7 @@
 		{@const users = await listUsers()}
 		<Card
 			title="Users"
-			description="The first account is an admin. Admins manage users, sign-up and build runners."
+			description="The first account is an admin. Admins manage users, sign-up and build runners. Export moves a user’s locations, firmwares and devices to another server (Import there)."
 			flush
 		>
 			{#snippet actions()}<Button size="sm" variant="primary" onclick={() => (inviting = true)}
@@ -199,6 +218,8 @@
 									/>
 								</td>
 								<td class="px-5 py-2.5 text-right whitespace-nowrap">
+									<Button size="sm" variant="ghost" onclick={() => exportFor(u)}>Export</Button>
+									<Button size="sm" variant="ghost" onclick={() => importFor(u)}>Import</Button>
 									{#if u.id !== me?.id}
 										<Button
 											size="sm"

@@ -48,11 +48,10 @@ export const signIn = form(
 	}
 );
 
-/** Who may change their password: the signed-in user, or one who must change a generated one. */
+/** Who must change a generated password (signed-in users change theirs in settings). */
 export const getPasswordChange = query(async () => {
-	const { locals } = getRequestEvent();
-	const u = locals.user ?? locals.passwordChange;
-	return u ? { email: u.email, forced: !locals.user } : null;
+	const u = getRequestEvent().locals.passwordChange;
+	return u ? { email: u.email } : null;
 });
 
 /**

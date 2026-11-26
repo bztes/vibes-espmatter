@@ -1,7 +1,7 @@
 <script lang="ts">
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LogOut from '@lucide/svelte/icons/log-out';
+	import Settings from '@lucide/svelte/icons/settings';
 	import Shield from '@lucide/svelte/icons/shield';
 	import { afterNavigate } from '$app/navigation';
 	import { page } from '$app/state';
@@ -86,10 +86,13 @@
 							{/if}
 							<a
 								role="menuitem"
-								href={resolve('/(auth)/password')}
-								class="flex items-center gap-2 px-3 py-2 text-sm text-muted no-underline hover:bg-surface-2 hover:text-fg"
+								href={resolve('/(app)/settings')}
+								class={[
+									'flex items-center gap-2 px-3 py-2 text-sm no-underline hover:bg-surface-2',
+									page.url.pathname.startsWith('/settings') ? 'text-fg' : 'text-muted hover:text-fg'
+								]}
 							>
-								<KeyRound size={16} />Change password
+								<Settings size={16} />Settings
 							</a>
 							<form {...signOut} class="border-t border-border">
 								<button
