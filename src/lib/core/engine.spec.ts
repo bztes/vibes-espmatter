@@ -167,11 +167,13 @@ describe('hub', () => {
 		expect(main.defines.ESPM_SLOTFLASH).toBe(true);
 		expect(a.api.some((r) => r.path === '/api/v1/slots')).toBe(true);
 
-		// The hub doesn't carry the radio's firmware: it fetches updates from the app.
+		// The hub carries the radio's firmware: the build makes it first and embeds it.
 		const generated = generate(a, () => '');
 		const mainProject = generated.find((g) => g.slot === 'main')!;
-		expect(mainProject.files['main/CMakeLists.txt']).not.toContain('slot_radio');
+		expect(mainProject.files['main/CMakeLists.txt']).toContain('"slot_radio.bin"');
+		expect(mainProject.embeds).toEqual([{ slot: 'radio', file: 'slot_radio.bin' }]);
 		const table = mainProject.files['main/espm_slots.c'];
+		expect(table).toContain('.image = _binary_slot_radio_bin_start');
 		expect(table).toContain('.trigger = ' + tbr.hostTrigger);
 		expect(table).toContain('.force_reg = 0x600b1034');
 		expect(table).toContain('.app_offset = 0x20000');
@@ -268,20 +270,25 @@ describe('device', () => {
 		expect(main.files['main/app_main.cpp']).toContain('espm_climate_add(');
 		expect(main.files['main/CMakeLists.txt']).toContain('espm_relay.cpp');
 		expect(main.files['main/espm_config.h']).toContain('#define ESPM_FW_VERSION 7');
-		expect(main.files['main/espm_config.h']).toContain('#define ESPM_UPDATE_PULL 1');
+		expect(main.files['main/espm_config.h']).toContain('#define ESPM_MATTER_OTA 1');
+		expect(main.files['sdkconfig.defaults']).toContain('CONFIG_ENABLE_OTA_REQUESTOR=y');
 		expect(main.files['sdkconfig.defaults']).toContain('CONFIG_IDF_TARGET="esp32c6"');
 		expect(main.needsUi).toBe(true);
 		expect(a.api.some((r) => r.path.startsWith('/api/v1/peripherals/'))).toBe(true);
 	});
 
-	it('pulls through the hub on Thread', () => {
+	it('gets its updates over Matter on Thread', () => {
 		const dev = createConfig('device', 'Thread sensor');
 		setBoard(dev, 'main', 'esp32-h2-supermini');
 		enableFeature(dev, 'thread');
 		addPeripheral(dev, 'contact-sensor');
 		const a = assemble(dev);
 		const defines = a.firmware[0].defines;
-		expect(defines.ESPM_UPDATE_VIA_HUB).toBe(true);
+		expect(defines).toMatchObject({
+			ESPM_MATTER_OTA: true,
+			ESPM_UPDATE_PULL: false,
+			ESPM_VIA_HUB: true
+		});
 	});
 });
 

@@ -79,6 +79,23 @@ export interface Node {
 	vendor?: string;
 	product?: string;
 	softwareVersion?: string;
+	/** Devices that take Matter updates: read every minute while online. */
+	update?: {
+		state?:
+			| 'unknown'
+			| 'idle'
+			| 'querying'
+			| 'delayedOnQuery'
+			| 'downloading'
+			| 'applying'
+			| 'delayedOnApply'
+			| 'rollingBack'
+			| 'delayedOnUserConsent';
+		/** %, while downloading. */
+		progress?: number;
+		/** The version waiting for approval (updates on approval). */
+		available?: string;
+	};
 	/** Battery-powered devices: %, and/or the coarse level. */
 	battery?: number;
 	batteryLevel?: 'ok' | 'warning' | 'critical';

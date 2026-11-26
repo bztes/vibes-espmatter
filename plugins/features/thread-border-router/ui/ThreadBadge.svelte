@@ -11,14 +11,12 @@
 	{@const rcp = thread.current.rcp}
 	<div class="flex items-end justify-between">
 		<Stat label="Thread devices" value={thread.current.children ?? 0} />
-		<Badge tone={rcp === 'ok' ? 'ok' : rcp === 'starting' || rcp === 'updating' ? 'warn' : 'err'}
+		<Badge tone={rcp === 'ok' ? 'ok' : rcp === 'starting' ? 'warn' : 'err'}
 			>{rcp === 'ok'
 				? thread.current.role
 				: rcp === 'starting'
 					? 'radio starting'
-					: rcp === 'updating'
-						? 'radio updating'
-						: 'radio offline'}</Badge
+					: 'radio offline'}</Badge
 		>
 	</div>
 {/if}

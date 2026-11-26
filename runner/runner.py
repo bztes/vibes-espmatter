@@ -126,11 +126,16 @@ def write_workspace(ws, files, emit):
 
 
 def upload(job, ws):
-    """Uploads what the app needs: flasher_args.json and the files it names."""
+    """Uploads what the app needs: flasher_args.json, the files it names and the Matter OTA image."""
     build = os.path.join(ws, 'build')
     with open(os.path.join(build, 'flasher_args.json')) as f:
         args = json.load(f)
-    for rel in dict.fromkeys(['flasher_args.json', args['app']['file'], *args['flash_files'].values()]):
+    files = ['flasher_args.json', args['app']['file'], *args['flash_files'].values()]
+    # Matter devices: the app with the Matter OTA header, when the build made one.
+    matter = args['app']['file'][:-4] + '-ota.bin'
+    if os.path.isfile(safe_join(build, matter)):
+        files.append(matter)
+    for rel in dict.fromkeys(files):
         with open(safe_join(build, rel), 'rb') as f:
             data = f.read()
         path = f'/api/v1/runners/jobs/{job}/files/{urllib.parse.quote(rel)}'

@@ -331,10 +331,10 @@ export async function deviceFetch(dev: Reachable, req: TunnelRequest): Promise<R
 		...req,
 		path: `/api/v1/relay/forward/${dev.id}${req.path}`
 	});
-	// The hub learns a device's address from its reports and update checks through the relay.
+	// The hub learns a device’s address from its reports through the relay.
 	if (res.status === 421)
 		throw new TunnelError(
-			'The hub doesn’t know where the device is yet – it learns that at the device’s next report or update check.',
+			'The hub doesn’t know where the device is yet – it learns that at the device’s next report (after it starts).',
 			503
 		);
 	return res;

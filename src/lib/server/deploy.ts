@@ -2,20 +2,21 @@
  * Getting builds onto devices – a build of a firmware goes onto any of its devices:
  *
  * - `usb`:  the browser flashes over Web Serial (with the device's configuration) and reports.
- * - `pull`: the device asks `GET /api/v1/devices/<id>/update` periodically and downloads it.
- * - `hub`:  like pull, but the device asks through its hub's relay, which proxies to here.
+ * - `pull`: a hub asks `GET /api/v1/devices/<id>/update` periodically and downloads it.
+ * - `hub`:  a Matter device gets it over Matter from its hub's OTA provider, which asks here for
+ *           it (`?format=matter`) with the hub's token.
  *
- * Releasing a build for pull also nudges the device (`POST /api/v1/ota/check`) so it asks right
- * away; when this server can't reach it, it asks at its next periodic check anyway. A device's
- * settings are written by USB flashing, or by the app through its tunnel (`PUT /api/v1/config`).
+ * Releasing a build also nudges the device (`POST /api/v1/ota/check`) so it asks right away; when
+ * this server can't reach it, it asks at its next periodic check anyway. Boards the main board
+ * flashes over a wire come inside the main board's firmware. A device's settings are written by
+ * USB flashing, or by the app through its tunnel (`PUT /api/v1/config`).
  */
 import { timingSafeEqual } from 'node:crypto';
 import { error } from '@sveltejs/kit';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { normalize, resolve } from '#lib/core/engine.ts';
 import type { FirmwareConfig } from '#lib/core/model.ts';
-import { appLink } from '#lib/core/link.ts';
-import { canPull } from '#lib/core/platform.ts';
+import { canPull, matterOta } from '#lib/core/platform.ts';
 import { db } from './db/index.ts';
 import {
 	build,
@@ -46,7 +47,10 @@ export async function deviceFromToken(request: Request, deviceId?: string) {
 	if (!token) error(401, 'Bearer token required');
 	const rows = deviceId
 		? await db.select().from(device).where(eq(device.id, deviceId))
-		: await db.select().from(device).where(eq(device.apiToken, token));
+		: await db
+				.select()
+				.from(device)
+				.where(or(eq(device.apiToken, token), eq(device.previousToken, token)));
 	const row = rows[0];
 	if (!row) error(401, 'Invalid token');
 	if (same(row.apiToken, token)) {
@@ -62,20 +66,35 @@ export async function deviceFromToken(request: Request, deviceId?: string) {
 	error(401, 'Invalid token');
 }
 
+/**
+ * The device of `deviceId`, asked for by the device itself or by its hub (the hub's OTA provider
+ * fetches its devices' updates).
+ */
+export async function deviceOrItsHub(request: Request, deviceId: string) {
+	const caller = await deviceFromToken(request);
+	if (caller.id === deviceId) return caller;
+	const [dev] = await db
+		.select()
+		.from(device)
+		.where(and(eq(device.id, deviceId), eq(device.hubId, caller.id)));
+	if (!dev) error(401, 'Invalid token');
+	return dev;
+}
+
 /** The token the board has: the previous one until it confirmed the new one. */
 export const boardToken = (dev: Pick<DeviceRow, 'apiToken' | 'previousToken'>) =>
 	dev.previousToken ?? dev.apiToken;
 
 /**
- * How a build of a firmware reaches a slot over the air (whatever devices allow): `pull` directly
- * from this app, `hub` through its hub's relay, or undefined – USB only. A board the main board
- * flashes over a wire gets its updates the way the main board gets its own.
+ * How a build of a firmware reaches the main board over the air: `pull` – a hub, directly from
+ * this app; `hub` – a Matter device, over Matter from its hub; undefined – USB only. Other boards
+ * come inside the main board's firmware.
  */
 export function otaMethod(config: FirmwareConfig, slot: string): 'pull' | 'hub' | undefined {
+	if (slot !== 'main') return undefined;
 	const r = resolve(config);
-	if (slot !== 'main' && !r.slots.find((s) => s.id === slot)?.wired) return undefined;
-	if (!canPull(r)) return undefined;
-	return appLink(r).updates === 'hub' ? 'hub' : 'pull';
+	if (canPull(r)) return 'pull';
+	return matterOta(r) ? 'hub' : undefined;
 }
 
 /**
@@ -83,7 +102,8 @@ export function otaMethod(config: FirmwareConfig, slot: string): 'pull' | 'hub' 
  * the board's setting: it tells when nudged.
  */
 export function blockedOta(dev: DeviceContext, method: 'pull' | 'hub'): string | undefined {
-	if (method === 'hub' && !dev.hubId) return 'Pick its hub under Settings → App link.';
+	if (method === 'hub' && !dev.hubId)
+		return 'Its updates come from its hub: pick the hub under Settings → App link and pair the device with it.';
 	return undefined;
 }
 
@@ -124,11 +144,10 @@ export async function createDeployment(
 export async function release(
 	buildId: string,
 	dev: DeviceRow,
-	slots: string[],
+	slot: string,
 	method: 'pull' | 'hub'
 ) {
-	const rows: Awaited<ReturnType<typeof createDeployment>>[] = [];
-	for (const slot of slots) rows.push(await createDeployment(buildId, dev.id, slot, method));
+	const row = await createDeployment(buildId, dev.id, slot, method);
 	void nudge(dev).then((reason) =>
 		db
 			.update(deployment)
@@ -138,17 +157,9 @@ export async function release(
 					: 'Released – the device was asked to check now.'
 			})
 			// The device may already be downloading: its report wins.
-			.where(
-				and(
-					inArray(
-						deployment.id,
-						rows.map((r) => r.id)
-					),
-					eq(deployment.state, 'pending')
-				)
-			)
+			.where(and(eq(deployment.id, row.id), eq(deployment.state, 'pending')))
 	);
-	return rows;
+	return row;
 }
 
 /**
@@ -162,7 +173,6 @@ export async function rollOut(buildId: string, deviceIds?: string[]) {
 		error(409, 'Only finished builds can be installed.');
 	const config = normalize(b.config);
 	const method = otaMethod(config, 'main');
-	const wired = Object.keys(b.slots).filter((slot) => slot !== 'main' && b.slots[slot].viaMain);
 	const rows = await db
 		.select()
 		.from(device)
@@ -187,18 +197,12 @@ export async function rollOut(buildId: string, deviceIds?: string[]) {
 			results.push({ deviceId: dev.id, name: dev.name, skipped: blocked });
 			continue;
 		}
-		// The main board's own update, and those it installs on its wired boards.
-		const slots = [...wired, 'main'].filter(
-			(slot) =>
-				dev.reported[slot]?.running !== b.version &&
-				(slot === 'main' || otaMethod(config, slot) === method)
-		);
-		if (!slots.length) {
+		if (dev.reported.main?.running === b.version) {
 			results.push({ deviceId: dev.id, name: dev.name, skipped: `Runs version ${b.version}.` });
 			continue;
 		}
-		await release(buildId, dev, slots, method);
-		results.push({ deviceId: dev.id, name: dev.name, method, slots });
+		await release(buildId, dev, 'main', method);
+		results.push({ deviceId: dev.id, name: dev.name, method, slots: ['main'] });
 	}
 	return results;
 }

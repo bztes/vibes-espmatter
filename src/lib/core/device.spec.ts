@@ -20,7 +20,7 @@ describe('per-device settings', () => {
 		expect(header).toContain('#include "espm_cfg.h"');
 		expect(header).toContain('#define ESPM_WIFI_SSID (espm_cfg_str("f.wifi", "ssid", ""))');
 		expect(header).toContain('#define ESPM_API_TOKEN (espm_cfg_str("espm", "token", ""))');
-		expect(header).toContain('#define ESPM_UPDATE_PULL 1');
+		expect(header).toContain('#define ESPM_MATTER_OTA 1');
 		// Pins stay compiled in, the startup state is the device's.
 		expect(main.files['main/app_main.cpp']).toContain(
 			`espm_cfg_str("p.${relay.uid}", "startup", "last")`

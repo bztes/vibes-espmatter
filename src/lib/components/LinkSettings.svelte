@@ -2,7 +2,7 @@
 <script lang="ts">
 	import type { Issue } from '#sdk';
 	import type { Resolved } from '#lib/core/engine.ts';
-	import { ACCESS_LABEL, appLink, UPDATES_LABEL } from '#lib/core/link.ts';
+	import { ACCESS_LABEL, appLink } from '#lib/core/link.ts';
 	import type { FirmwareConfig } from '#lib/core/model.ts';
 	import { Card, Segmented, Toggle } from '#lib/ui/index.ts';
 	import IssueList from './IssueList.svelte';
@@ -58,32 +58,22 @@
 					<div class="text-sm">
 						<div class="font-medium">Relay for other devices</div>
 						<div class="text-xs text-muted">
-							Devices get their updates through the hub, and the app reaches them through the hub’s
-							tunnel. Thread devices always need one.
+							Devices without a tunnel of their own report to the app through the hub, and the app
+							reaches them through the hub’s tunnel. Thread devices always need one.
 						</div>
 					</div>
 				</div>
 				<p class="m-0 text-xs text-muted">
-					Updates: the hub pulls them from the app itself, at its app URL.
+					Updates: the hub pulls its own from the app, at its app URL, and sends paired devices
+					theirs over Matter.
 				</p>
 			</div>
 		{:else}
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div class="grid content-start gap-1.5">
 					<span class="text-sm font-medium">Updates</span>
-					<Segmented
-						label="Updates"
-						value={link.updates}
-						disabled={link.options.updates.length < 2}
-						options={link.options.updates.map((v) => ({ value: v, label: UPDATES_LABEL[v] }))}
-						onchange={(v) => (config.link.updates = v as typeof config.link.updates)}
-					/>
 					<p class="m-0 text-xs text-muted">
-						{link.updates === 'app'
-							? 'Pulled from the app at the device’s app URL.'
-							: thread
-								? 'Thread devices can’t reach the app themselves.'
-								: 'The hub passes them on – the device needs no app URL.'}
+						Over Matter, from the hub it is paired with – the hub fetches them from the app.
 					</p>
 				</div>
 				<div class="grid content-start gap-1.5">

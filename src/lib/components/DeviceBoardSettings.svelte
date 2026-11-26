@@ -16,7 +16,7 @@
 	} from '#lib/core/matter.ts';
 	import { appLink } from '#lib/core/link.ts';
 	import type { DeviceSettings, FirmwareConfig } from '#lib/core/model.ts';
-	import { canPull } from '#lib/core/platform.ts';
+	import { canPull, matterOta } from '#lib/core/platform.ts';
 	import type { getDevice } from '#lib/remote/devices.remote.ts';
 	import { Badge, Button, Card, CopyButton, Dialog, Field, Input, Toggle } from '#lib/ui/index.ts';
 	import IssueList from './IssueList.svelte';
@@ -45,6 +45,7 @@
 	const resolved = $derived(resolveConfig(effective));
 	const link = $derived(appLink(resolved));
 	const pull = $derived(canPull(resolved));
+	const overMatter = $derived(matterOta(resolved));
 	const reachable = $derived(link.access !== 'off');
 	const matter = $derived(KINDS[device.kind].matterDevice);
 	const scopes = $derived(perDeviceScopes(firmware));
@@ -221,7 +222,7 @@
 						label="App URL"
 						id="app-url"
 						help="Where it reaches the app itself ({[
-							link.updates === 'app' && 'updates',
+							device.kind === 'hub' && 'updates',
 							link.access === 'tunnel' && 'tunnel'
 						]
 							.filter(Boolean)
@@ -237,38 +238,45 @@
 				</Card>
 			{/if}
 
-			<Card
-				title="Updates"
-				description="New firmware after the first USB flash, pulled by the device."
-			>
-				<div class="grid gap-4">
-					<div class="flex items-start gap-3">
-						<Toggle label="Updates" bind:checked={settings.updates.pull} disabled={!pull} />
-						<div class="text-sm">
-							<div class="font-medium">The device checks for updates</div>
-							<div class="text-xs text-muted">
-								{#if !pull}Needs an IP network – USB only.{:else if !settings.updates.pull}Off – it
-									only reports what it runs; updates over USB only.{:else}{link.updates === 'hub'
-										? 'Through its hub.'
-										: 'From the app, at its app URL.'}{#if reachable}
-										The app also asks it to check right away after you install a build.{/if}{/if}
+			{#if pull}
+				<Card
+					title="Updates"
+					description="New firmware after the first USB flash, pulled by the hub."
+				>
+					<div class="grid gap-4">
+						<div class="flex items-start gap-3">
+							<Toggle label="Updates" bind:checked={settings.updates.pull} />
+							<div class="text-sm">
+								<div class="font-medium">The hub checks for updates</div>
+								<div class="text-xs text-muted">
+									{#if !settings.updates.pull}Off – it only reports what it runs; updates over USB
+										only.{:else}From the app, at its app URL.{#if reachable}
+											The app also asks it to check right away after you install a build.{/if}{/if}
+								</div>
 							</div>
 						</div>
+						{#if settings.updates.pull}
+							<Field label="Check every" id="interval" help="Minutes (5–1440)">
+								<Input
+									id="interval"
+									type="number"
+									min="5"
+									max="1440"
+									class="max-w-32"
+									bind:value={settings.updates.intervalMin}
+								/>
+							</Field>
+						{/if}
 					</div>
-					{#if pull && settings.updates.pull}
-						<Field label="Check every" id="interval" help="Minutes (5–1440)">
-							<Input
-								id="interval"
-								type="number"
-								min="5"
-								max="1440"
-								class="max-w-32"
-								bind:value={settings.updates.intervalMin}
-							/>
-						</Field>
-					{/if}
-				</div>
-			</Card>
+				</Card>
+			{:else if overMatter}
+				<Card title="Updates" description="New firmware after the first USB flash.">
+					<p class="m-0 text-sm text-muted">
+						Over Matter, from the hub it is paired with: the hub fetches the builds you install from
+						the app. The device also checks once a day by itself.
+					</p>
+				</Card>
+			{/if}
 		</div>
 	</section>
 </div>

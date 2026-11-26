@@ -1,20 +1,15 @@
 // espmatter studio – the main board flashes boards wired to it (SlotDef.flashOverWire).
 //
-// A board's updates are deployments like the main board's: the app (or, on a Thread device, a hub's
-// update relay) answers `/devices/<id>/update?slot=<board>` with the image to install. Once online,
-// before any plugin uses the wires (espm_slot_wait), the main board asks for each board's update
-// and, if there is one:
+// The main board's firmware carries each board's app (embedded at build time, espm_slots.c). At
+// boot, before any plugin uses the wires (espm_slot_wait), it compares the embedded app with what it
+// flashed last (SHA-256) and, if they differ:
 //
 //   1. pulls the trigger line low – the board's espm_slotboot.c restarts it into the ROM's serial
 //      download mode (no reset/boot pins needed),
-//   2. streams the image from the app into the board's flash, 1 KB at a time, with the ROM loader
-//      protocol (as esptool does, without the stub) over the board's UART0, and checks it (MD5 of
-//      the flash, SHA-256 of the download),
-//   3. clears the board's force-download flag, reboots it into the new firmware and reports back.
+//   2. writes the app into the board's flash, 1 KB at a time, with the ROM loader protocol (as
+//      esptool does, without the stub) over the board's UART0, and checks it (MD5 of the flash),
+//   3. clears the board's force-download flag, reboots it into the new firmware and reports it.
 //
-// An update found while running (the main board's update check) is installed right away: the
-// plugin using the wires lets go of them meanwhile (espm_slot_on_update). A plugin that can't
-// makes it a restart of the main board instead, the update is then installed at boot.
 // Only the app is replaced – bootloader and partition table stay from the first (USB) flash.
 #include "espm_slotflash.h"
 
@@ -25,7 +20,6 @@
 
 #include <driver/gpio.h>
 #include <driver/uart.h>
-#include <esp_http_client.h>
 #include <esp_log.h>
 #include <esp_rom_md5.h>
 #include <esp_system.h>
@@ -40,6 +34,9 @@
 
 static const char *TAG = "espm_slotflash";
 
+/** The embedded app's size. */
+static size_t image_size(const espm_slot_t &slot) { return (size_t)(slot.image_end - slot.image); }
+
 #define PORT UART_NUM_1
 #define SYNC_BAUD 115200
 #define FAST_BAUD 460800
@@ -48,8 +45,8 @@ static const char *TAG = "espm_slotflash";
 /** ROM replies end in 4 status bytes (the stub's in 2). */
 #define STATUS_LEN 4
 #define NVS_NS "espm_slots"
-/** How long the plugins wait for the network before the boards start without an update check. */
-#define ONLINE_WAIT_MS 60000
+/** How long the report of what the boards run waits for the network. */
+#define ONLINE_WAIT_MS 120000
 
 enum : uint8_t {
     CMD_FLASH_BEGIN = 0x02,
@@ -195,9 +192,9 @@ static int timeout_per_mb(int ms_per_mb, size_t size)
     return t < 3000 ? 3000 : t;
 }
 
-static void md5_hex(const uint8_t digest[16], char out[33])
+static void hex(const uint8_t *digest, size_t n, char *out)
 {
-    for (int i = 0; i < 16; i++) sprintf(out + 2 * i, "%02x", digest[i]);
+    for (size_t i = 0; i < n; i++) sprintf(out + 2 * i, "%02x", digest[i]);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -211,11 +208,6 @@ struct slot_state_t {
     const char *state; // idle | flashing | failed
     int progress;
     char error[96];
-    /** An update of this version failed: don't try it again until the next boot. */
-    int failed_version;
-    /** The plugin using the wires (espm_slot_on_update), or nullptr. */
-    void (*release)();
-    void (*reclaim)();
 };
 static slot_state_t *s_state;
 static EventGroupHandle_t s_ready;
@@ -326,10 +318,10 @@ static void leave(const espm_slot_t &slot)
     command(CMD_FLASH_END, reboot, sizeof(reboot), 0, 500);
 }
 
-/** Stream the image into the board's app partition. */
-static esp_err_t write_app(const espm_slot_t &slot, slot_state_t &st, esp_http_client_handle_t src, size_t size,
-                           const char *want_sha256, char sha256_out[65])
+/** Write the embedded app into the board's app partition. */
+static esp_err_t write_app(const espm_slot_t &slot, slot_state_t &st)
 {
+    const size_t size = image_size(slot);
     uint32_t blocks = (size + BLOCK - 1) / BLOCK;
     uint8_t params[20] = {};
     put32(params, size); // erase size
@@ -344,26 +336,12 @@ static esp_err_t write_app(const espm_slot_t &slot, slot_state_t &st, esp_http_c
     }
     md5_context_t md5;
     esp_rom_md5_init(&md5);
-    mbedtls_sha256_context sha;
-    mbedtls_sha256_init(&sha);
-    mbedtls_sha256_starts(&sha, 0);
     esp_err_t err = ESP_OK;
     size_t done = 0;
     for (uint32_t seq = 0; seq < blocks && err == ESP_OK; seq++) {
         size_t chunk = size - done < BLOCK ? size - done : BLOCK;
-        size_t got = 0;
-        while (got < chunk) {
-            int n = esp_http_client_read(src, (char *)s_pkt + 16 + got, chunk - got);
-            if (n <= 0) break;
-            got += n;
-        }
-        if (got < chunk) {
-            snprintf(st.error, sizeof(st.error), "Download interrupted at %u bytes", (unsigned)(done + got));
-            err = ESP_ERR_INVALID_SIZE;
-            break;
-        }
+        memcpy(s_pkt + 16, slot.image + done, chunk);
         esp_rom_md5_update(&md5, s_pkt + 16, chunk);
-        mbedtls_sha256_update(&sha, s_pkt + 16, chunk);
         memset(s_pkt, 0, 16);
         put32(s_pkt, BLOCK);
         put32(s_pkt + 4, seq);
@@ -377,20 +355,12 @@ static esp_err_t write_app(const espm_slot_t &slot, slot_state_t &st, esp_http_c
         done += chunk;
         st.progress = (int)(done * 100 / size);
     }
-    uint8_t digest[32];
-    mbedtls_sha256_finish(&sha, digest);
-    mbedtls_sha256_free(&sha);
-    for (int i = 0; i < 32; i++) sprintf(sha256_out + 2 * i, "%02x", digest[i]);
     if (err != ESP_OK) return err;
-    if (want_sha256[0] && strcasecmp(want_sha256, sha256_out) != 0) {
-        snprintf(st.error, sizeof(st.error), "The download doesn't match its SHA-256");
-        return ESP_ERR_INVALID_CRC;
-    }
-    // What the flash holds now must be what was downloaded.
+    // What the flash holds now must be what was sent.
     uint8_t md5_digest[16];
     esp_rom_md5_final(md5_digest, &md5);
     char want[33], have[33] = {};
-    md5_hex(md5_digest, want);
+    hex(md5_digest, 16, want);
     uint8_t md5_params[16] = {};
     put32(md5_params, slot.app_offset);
     put32(md5_params + 4, size);
@@ -403,13 +373,23 @@ static esp_err_t write_app(const espm_slot_t &slot, slot_state_t &st, esp_http_c
     return ESP_OK;
 }
 
-/** Flash `size` bytes downloading from `src` (SHA-256 `sha256`, "" if unknown) as `version` of board `i`. */
-static esp_err_t flash(int i, int version, size_t size, const char *want_sha256, esp_http_client_handle_t src)
+/** SHA-256 (hex) of the embedded app. */
+static void image_sha256(const espm_slot_t &slot, char out[65])
+{
+    uint8_t digest[32];
+    mbedtls_sha256(slot.image, image_size(slot), digest, 0);
+    hex(digest, sizeof(digest), out);
+}
+
+/** Flash the embedded app (SHA-256 `sha256`) onto board `i`. */
+static esp_err_t flash(int i, const char *sha256)
 {
     const espm_slot_t &slot = espm_slots[i];
     slot_state_t &st = s_state[i];
+    const int version = ESPM_FW_VERSION;
+    const size_t size = image_size(slot);
     if (!size || size > slot.app_max) {
-        snprintf(st.error, sizeof(st.error), size ? "Image larger than the board's app partition" : "Image size unknown");
+        snprintf(st.error, sizeof(st.error), size ? "Image larger than the board's app partition" : "No image");
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -433,14 +413,13 @@ static esp_err_t flash(int i, int version, size_t size, const char *want_sha256,
     st.error[0] = 0;
     int64_t started = esp_timer_get_time();
     esp_err_t err = ESP_FAIL;
-    char sha256[65] = {};
     if (!enter_download_mode(slot)) {
         snprintf(st.error, sizeof(st.error), "No answer – flash it over USB once and check the wiring");
     } else if (!prepare(slot)) {
         snprintf(st.error, sizeof(st.error), "The board's flash did not respond");
     } else {
         ESP_LOGI(TAG, "%s: writing version %d (%u bytes)", slot.name, version, (unsigned)size);
-        err = write_app(slot, st, src, size, want_sha256, sha256);
+        err = write_app(slot, st);
         // Back to its firmware either way: the new one, or (failed) whatever is in flash.
         leave(slot);
     }
@@ -456,117 +435,40 @@ static esp_err_t flash(int i, int version, size_t size, const char *want_sha256,
         vTaskDelay(pdMS_TO_TICKS(500)); // the board boots its new firmware
     } else {
         st.state = "failed";
-        st.failed_version = version;
         ESP_LOGE(TAG, "%s: %s", slot.name, st.error);
     }
     return err;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Updates: the app (or a hub's relay) has one
+// At boot: flash what the main board's firmware carries, if it changed
 // ---------------------------------------------------------------------------------------------
-
-/** Ask for the board's update and install it. */
-static void update(int i)
-{
-    const espm_slot_t &slot = espm_slots[i];
-    slot_state_t &st = s_state[i];
-    espm_update_t u;
-    if (!espm_update_manifest(slot.id, st.version, &u)) {
-        espm_update_report(slot.id, "running", st.version, st.version, nullptr);
-        return;
-    }
-    // The same app under another version (a rebuild that didn't change it): nothing to flash.
-    if (u.sha256[0] && strcasecmp(u.sha256, st.sha256) == 0) {
-        st.version = u.version;
-        save(i);
-        espm_update_report(slot.id, "installed", u.version, u.version, nullptr);
-        return;
-    }
-    ESP_LOGI(TAG, "%s: update to version %d", slot.name, u.version);
-    espm_update_report(slot.id, "downloading", u.version, st.version, nullptr);
-    int64_t length = 0;
-    esp_http_client_handle_t client = espm_update_open(u.url, &length);
-    esp_err_t err = ESP_FAIL;
-    if (!client) {
-        st.state = "failed";
-        st.failed_version = u.version;
-        snprintf(st.error, sizeof(st.error), "Download failed");
-    } else {
-        err = flash(i, u.version, length > 0 ? (size_t)length : (size_t)u.size, u.sha256, client);
-        esp_http_client_cleanup(client);
-    }
-    if (err == ESP_OK) espm_update_report(slot.id, "installed", u.version, u.version, nullptr);
-    else espm_update_report(slot.id, "failed", u.version, st.version, st.error);
-}
-
-static void restart_later(void *)
-{
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    esp_restart();
-}
-
-/** An install found while running is underway (one at a time). */
-static volatile bool s_busy;
-
-/** While running: the plugin lets go of the wires, the board is flashed and restarted, the plugin takes them back. */
-static void install_task(void *arg)
-{
-    int i = (int)(intptr_t)arg;
-    slot_state_t &st = s_state[i];
-    ESP_LOGI(TAG, "%s: pausing its plugin for the update", espm_slots[i].name);
-    st.release();
-    update(i);
-    st.reclaim();
-    s_busy = false;
-    vTaskDelete(nullptr);
-}
-
-void espm_slotflash_check()
-{
-    // At boot the boards are checked (and flashed) by boot_task – acting now would interrupt that.
-    const EventBits_t all = (1 << espm_slot_count) - 1;
-    if (!s_ready || (xEventGroupGetBits(s_ready) & all) != all || s_busy) return;
-    for (int i = 0; i < espm_slot_count; i++) {
-        espm_update_t u;
-        if (!espm_update_manifest(espm_slots[i].id, s_state[i].version, &u)) continue;
-        if (u.version == s_state[i].failed_version) continue; // failed before: don't loop
-        if (u.sha256[0] && strcasecmp(u.sha256, s_state[i].sha256) == 0) continue;
-        if (s_state[i].release) {
-            ESP_LOGI(TAG, "%s: version %d available – installing it", espm_slots[i].name, u.version);
-            s_busy = true;
-            if (xTaskCreate(install_task, "espm_slotflash", 6144, (void *)(intptr_t)i, 4, nullptr) != pdPASS)
-                s_busy = false;
-            return;
-        }
-        // Its plugin can't let go of the wires: install at the next boot, before the plugin starts.
-        ESP_LOGI(TAG, "%s: version %d available – restarting to install it", espm_slots[i].name, u.version);
-        xTaskCreate(restart_later, "restart", 2048, nullptr, 5, nullptr);
-        return;
-    }
-}
 
 static void boot_task(void *)
 {
-    int64_t until = esp_timer_get_time() / 1000 + ONLINE_WAIT_MS;
-    while (!espm_online() && esp_timer_get_time() / 1000 < until) vTaskDelay(pdMS_TO_TICKS(500));
-    if (espm_online())
-        for (int i = 0; i < espm_slot_count; i++) {
-            if (ESPM_UPDATE_PULL_ON) update(i);
-            else espm_update_report(espm_slots[i].id, "running", s_state[i].version, s_state[i].version, nullptr);
+    for (int i = 0; i < espm_slot_count; i++) {
+        char sha256[65];
+        image_sha256(espm_slots[i], sha256);
+        if (strcasecmp(sha256, s_state[i].sha256) != 0) {
+            ESP_LOGI(TAG, "%s: new firmware in this build – flashing it", espm_slots[i].name);
+            flash(i, sha256);
+        } else if (s_state[i].version != ESPM_FW_VERSION) {
+            // The same app in another build: nothing to flash.
+            s_state[i].version = ESPM_FW_VERSION;
+            save(i);
         }
+    }
     xEventGroupSetBits(s_ready, (1 << espm_slot_count) - 1);
+#if ESPM_UPDATE_PULL
+    // The app learns what the boards run.
+    int64_t until = esp_timer_get_time() / 1000 + ONLINE_WAIT_MS;
+    while (!espm_online() && esp_timer_get_time() / 1000 < until) vTaskDelay(pdMS_TO_TICKS(1000));
+    if (espm_online())
+        for (int i = 0; i < espm_slot_count; i++)
+            espm_update_report(espm_slots[i].id, s_state[i].state[0] == 'f' ? "failed" : "running",
+                               ESPM_FW_VERSION, s_state[i].version, s_state[i].error);
+#endif
     vTaskDelete(nullptr);
-}
-
-void espm_slot_on_update(const char *id, void (*release)(), void (*reclaim)())
-{
-    if (!s_state) return; // call it once espm_slot_wait returned
-    for (int i = 0; i < espm_slot_count; i++)
-        if (strcmp(espm_slots[i].id, id) == 0) {
-            s_state[i].release = release;
-            s_state[i].reclaim = reclaim;
-        }
 }
 
 void espm_slot_wait(const char *id)

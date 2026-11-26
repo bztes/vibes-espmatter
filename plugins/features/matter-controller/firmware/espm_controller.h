@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <esp_err.h>
 
 void espm_controller_start();
 
@@ -13,6 +14,8 @@ uint32_t espm_controller_switch_features(uint64_t node, uint16_t endpoint);
 bool espm_controller_has_endpoint(uint64_t node, uint16_t endpoint);
 /** The endpoint serves the cluster (`client`: uses it, i.e. can be linked to servers of it). */
 bool espm_controller_serves(uint64_t node, uint16_t endpoint, uint32_t cluster, bool client = false);
+/** The node's BasicInformation UniqueID (read at discovery), or nullptr. */
+const char *espm_controller_unique_id(uint64_t node);
 /** A followed attribute by its API key (`on`, `level`, `colorTemperature` …) while the node is online. */
 bool espm_controller_value(uint64_t node, uint16_t endpoint, const char *key, float *out);
 
@@ -27,3 +30,13 @@ __attribute__((weak)) void espm_automations_node_removed(uint64_t node);
 /** A node left the fabric: forget its links (espm_links.cpp). Stack lock held. */
 void espm_links_node_removed(uint64_t node);
 void espm_automations_start();
+
+// Firmware updates of paired devices (espm_ota_provider.cpp, with ESPM_CTRL_OTA; weak). Stack lock held.
+__attribute__((weak)) void espm_ota_provider_start();
+/** Discovered without the hub as its default OTA provider: make it that. */
+__attribute__((weak)) void espm_ota_provider_node_ready(uint64_t node);
+__attribute__((weak)) void espm_ota_provider_node_removed(uint64_t node);
+/** The version the registry has for the device while it waits for approval, else nullptr. */
+__attribute__((weak)) const char *espm_ota_provider_available(uint64_t node);
+/** The device asks the hub for an update now; one waiting for approval is installed. */
+esp_err_t espm_ota_provider_install(uint64_t node);

@@ -196,15 +196,13 @@
 					app={appHost}
 				/>
 
-				{#if link.viaHub}
+				{#if device.kind !== 'hub'}
 					<Field
 						label="Hub"
 						id="hub"
-						help="Its {link.updates === 'hub' && link.access === 'hub'
-							? 'updates and access go'
-							: link.updates === 'hub'
-								? 'updates go'
-								: 'access goes'} through this hub (its relay must be on)."
+						help="Its updates come from this hub over Matter – pair it with this hub.{link.viaHub
+							? ' The app reaches it through the hub’s relay (it must be on).'
+							: ''}"
 					>
 						<Select
 							id="hub"

@@ -44,7 +44,7 @@ export const deploy = command(
 			if (!ota) error(400, 'This build can only be installed over USB.');
 			const blocked = blockedOta(dev, ota);
 			if (blocked) error(400, blocked);
-			[row] = await release(buildId, dev, [slot], ota);
+			row = await release(buildId, dev, slot, ota);
 		}
 		void deployments(deviceId).reconnect();
 		void firmwareUpdates(dev.firmwareId).reconnect();

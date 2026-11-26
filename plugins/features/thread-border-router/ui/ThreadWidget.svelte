@@ -27,8 +27,6 @@
 	{@const t = thread.current}
 	{#if t.rcp === 'starting'}
 		<Notice>Starting the radio board – this can take a minute after the hub restarts.</Notice>
-	{:else if t.rcp === 'updating'}
-		<Notice>Installing an update on the radio board – Thread is paused until it’s back.</Notice>
 	{:else if t.rcp !== 'ok'}
 		<Notice tone="err"
 			>The radio board doesn’t answer – check the UART wiring and that it is flashed.</Notice

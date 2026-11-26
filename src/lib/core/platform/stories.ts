@@ -55,6 +55,24 @@ export default [
 		}
 	},
 	{
+		name: 'Firmware (Matter device)',
+		page: 'settings',
+		component: UpdatesWidget,
+		tab: 'System',
+		props: { matterOta: true },
+		api: {
+			'/api/v1/ota': {
+				version: 12,
+				via: 'matter',
+				pull: false,
+				partition: 'ota_1',
+				state: 'downloading',
+				lastCheckAgo: 30,
+				lastError: ''
+			}
+		}
+	},
+	{
 		name: 'Firmware (update failed)',
 		page: 'settings',
 		component: UpdatesWidget,

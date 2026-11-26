@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { Badge, Button, Poll, Row, api, formatDuration } from '#sdk/device-ui';
 
-	/** `canPull`: the firmware can pull updates; whether this device does is its own setting. */
-	let { canPull = false }: { canPull?: boolean } = $props();
+	/**
+	 * `canPull`: a hub that can pull its updates (whether it does is its own setting); `matterOta`:
+	 * a Matter device, updated over Matter by its hub.
+	 */
+	let { canPull = false, matterOta = false }: { canPull?: boolean; matterOta?: boolean } = $props();
 
 	interface Ota {
 		version: number;
@@ -48,10 +51,14 @@
 		<Row label="Last check">{new Date(o.lastCheck * 1000).toLocaleString()}</Row>
 	{/if}
 	<p class="mt-2 text-xs text-muted">
-		Updates: {canPull && o.pull ? 'from the app' : 'USB only'}.
+		Updates: {matterOta
+			? 'over Matter, from the hub it is paired with'
+			: canPull && o.pull
+				? 'from the app'
+				: 'USB only'}.
 	</p>
 {/if}
-{#if canPull && ota.current?.pull}
+{#if matterOta || (canPull && ota.current?.pull)}
 	<Button size="sm" class="mt-2" disabled={checking} onclick={check}
 		>{checking ? 'Checking…' : 'Check for updates'}</Button
 	>

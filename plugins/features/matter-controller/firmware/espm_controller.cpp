@@ -147,11 +147,20 @@ struct Node {
     // For the device list (admin page).
     char tags[64];             // comma-separated, persisted under "t<id>"
     char vendor[32], product[32], sw[24]; // Basic Information, read at discovery
+    char uid[33];                         // its UniqueID (a device of the app: its id there)
     bool power;                // has a Power Source cluster: battery is subscribed
     int16_t battery;           // BatPercentRemaining in %, -1 unknown
     int8_t charge;             // BatChargeLevel: 0 ok, 1 warning, 2 critical, -1 unknown
     int64_t seen_at;           // s, last report of any kind (0: none since boot)
+    // Firmware update (OTA Requestor on the root endpoint), read with the diagnostics.
+    bool requestor;
+    bool hub_provider;   // the hub is its default OTA provider already (discovery read)
+    int8_t upd_state;    // UpdateStateEnum, -1 unknown
+    int8_t upd_progress; // %, -1 unknown
 };
+/** OTA Requestor UpdateStateEnum. */
+static const char *UPDATE_STATES[] = {"unknown",  "idle",          "querying",    "delayedOnQuery", "downloading",
+                                      "applying", "delayedOnApply", "rollingBack", "delayedOnUserConsent"};
 static const char *CHARGE_NAMES[] = {"ok", "warning", "critical"};
 static constexpr int MAX_TAG_LEN = 24;
 
@@ -197,6 +206,8 @@ static Node make_node(uint64_t id, const char *name)
     n.backoff = 15;
     n.battery = -1;
     n.charge = -1;
+    n.upd_state = -1;
+    n.upd_progress = -1;
     return n;
 }
 
@@ -351,6 +362,19 @@ static bool store_node(Node &n, const ConcreteDataAttributePath &path, chip::TLV
             copy_string(data, n.product, sizeof(n.product));
         else if (path.mAttributeId == BasicInformation::Attributes::SoftwareVersionString::Id)
             copy_string(data, n.sw, sizeof(n.sw));
+        else if (path.mAttributeId == BasicInformation::Attributes::UniqueID::Id)
+            copy_string(data, n.uid, sizeof(n.uid));
+        return true;
+    }
+    if (path.mClusterId == OtaSoftwareUpdateRequestor::Id &&
+        path.mAttributeId == OtaSoftwareUpdateRequestor::Attributes::DefaultOTAProviders::Id) {
+        // Fabric-filtered: only the hub's own entry.
+        OtaSoftwareUpdateRequestor::Attributes::DefaultOTAProviders::TypeInfo::DecodableType list;
+        if (chip::app::DataModel::Decode(data, list) != CHIP_NO_ERROR) return true;
+        uint64_t hub = controller::matter_controller_client::get_instance().get_commissioner()->GetNodeId();
+        auto it = list.begin();
+        while (it.Next())
+            if (it.GetValue().providerNodeID == hub && it.GetValue().endpoint == 0) n.hub_provider = true;
         return true;
     }
     if (path.mClusterId == PowerSource::Id) {
@@ -591,6 +615,12 @@ bool espm_controller_serves(uint64_t node, uint16_t endpoint, uint32_t cluster, 
     return std::find(list, end, cluster) != end;
 }
 
+const char *espm_controller_unique_id(uint64_t node)
+{
+    Node *n = find(node);
+    return n && n->uid[0] ? n->uid : nullptr;
+}
+
 bool espm_controller_value(uint64_t node, uint16_t endpoint, const char *key, float *out)
 {
     Node *n = find(node);
@@ -672,6 +702,8 @@ static void on_read_done(uint64_t node_id, const ScopedMemoryBufferWithSize<Attr
     Node *n = find(node_id);
     if (!n || n->state != CONNECTING || n->sub) return;
     if (!n->discovered) return set_offline(*n);
+    n->requestor = espm_controller_serves(n->id, 0, OtaSoftwareUpdateRequestor::Id);
+    if (n->requestor && !n->hub_provider && espm_ota_provider_node_ready) espm_ota_provider_node_ready(n->id);
     subscribe(*n);
 }
 
@@ -684,9 +716,10 @@ static void discover(Node &n)
     n.sub = nullptr;
     n.eps.clear();
     n.power = false;
+    n.hub_provider = false;
     ScopedMemoryBufferWithSize<AttributePathParams> paths;
     ScopedMemoryBufferWithSize<EventPathParams> events;
-    paths.Alloc(6);
+    paths.Alloc(8);
     if (!paths.Get()) return set_offline(n);
     paths[0] = AttributePathParams(chip::kInvalidEndpointId, Descriptor::Id, Descriptor::Attributes::DeviceTypeList::Id);
     paths[1] = AttributePathParams(chip::kInvalidEndpointId, Descriptor::Id, Descriptor::Attributes::ServerList::Id);
@@ -695,6 +728,11 @@ static void discover(Node &n)
     paths[2] = AttributePathParams(0, BasicInformation::Id, BasicInformation::Attributes::VendorName::Id);
     paths[3] = AttributePathParams(0, BasicInformation::Id, BasicInformation::Attributes::ProductName::Id);
     paths[4] = AttributePathParams(0, BasicInformation::Id, BasicInformation::Attributes::SoftwareVersionString::Id);
+    // Which device of the app it is, if it's one (its updates come from the app).
+    paths[6] = AttributePathParams(0, BasicInformation::Id, BasicInformation::Attributes::UniqueID::Id);
+    // Whether the hub is its default OTA provider yet (a device without updates answers with a status).
+    paths[7] = AttributePathParams(0, OtaSoftwareUpdateRequestor::Id,
+                                   OtaSoftwareUpdateRequestor::Attributes::DefaultOTAProviders::Id);
     auto *cmd = chip::Platform::New<controller::read_command>(n.id, std::move(paths), std::move(events), on_read_attr,
                                                               on_read_done, nullptr);
     // A failed connection ends the read without a callback – tick() times it out.
@@ -706,6 +744,14 @@ static void on_diag_attr(uint64_t node_id, const ConcreteDataAttributePath &path
     Node *n = find(node_id);
     if (!n || n->state != ONLINE || !data || path.mEndpointId != 0) return;
     n->seen_at = now();
+    if (path.mClusterId == OtaSoftwareUpdateRequestor::Id) {
+        double v;
+        bool null;
+        if (!read_number(*data, v, null)) return;
+        if (path.mAttributeId == OtaSoftwareUpdateRequestor::Attributes::UpdateState::Id) n->upd_state = null ? -1 : (int8_t)v;
+        else n->upd_progress = null ? -1 : (int8_t)v;
+        return;
+    }
     for (int i = 0; i < N_DIAGS; i++) {
         if (DIAGS[i].cluster != path.mClusterId || DIAGS[i].attribute != path.mAttributeId) continue;
         double v;
@@ -725,9 +771,15 @@ static void read_diagnostics(Node &n)
 {
     ScopedMemoryBufferWithSize<AttributePathParams> paths;
     ScopedMemoryBufferWithSize<EventPathParams> events;
-    paths.Alloc(N_DIAGS);
+    paths.Alloc(N_DIAGS + (n.requestor ? 2 : 0));
     if (!paths.Get()) return;
     for (int i = 0; i < N_DIAGS; i++) paths[i] = AttributePathParams(0, DIAGS[i].cluster, DIAGS[i].attribute);
+    if (n.requestor) {
+        paths[N_DIAGS] = AttributePathParams(0, OtaSoftwareUpdateRequestor::Id,
+                                             OtaSoftwareUpdateRequestor::Attributes::UpdateState::Id);
+        paths[N_DIAGS + 1] = AttributePathParams(0, OtaSoftwareUpdateRequestor::Id,
+                                                 OtaSoftwareUpdateRequestor::Attributes::UpdateStateProgress::Id);
+    }
     auto *cmd = chip::Platform::New<controller::read_command>(n.id, std::move(paths), std::move(events), on_diag_attr,
                                                               nullptr, nullptr);
     if (cmd) cmd->send_command(); // deletes itself when done or failed
@@ -891,6 +943,7 @@ void espm_controller_start()
         auto &client = controller::matter_controller_client::get_instance();
         client.init(112233, ESPM_CTRL_FABRIC_ID, 5580);
         client.setup_commissioner();
+        if (espm_ota_provider_start) espm_ota_provider_start();
         chip::DeviceLayer::SystemLayer().StartTimer(chip::System::Clock::Seconds32(5), tick, nullptr);
     });
     controller::pairing_command_callbacks_t cbs = {on_pase, on_commissioned, on_failed};
@@ -929,6 +982,14 @@ static void add_info(cJSON *o, const Node &n)
     if (n.vendor[0]) cJSON_AddStringToObject(o, "vendor", n.vendor);
     if (n.product[0]) cJSON_AddStringToObject(o, "product", n.product);
     if (n.sw[0]) cJSON_AddStringToObject(o, "softwareVersion", n.sw);
+    if (n.requestor) {
+        cJSON *u = cJSON_AddObjectToObject(o, "update");
+        if (n.upd_state >= 0 && n.upd_state < (int)(sizeof(UPDATE_STATES) / sizeof(UPDATE_STATES[0])))
+            cJSON_AddStringToObject(u, "state", UPDATE_STATES[n.upd_state]);
+        if (n.upd_progress >= 0) cJSON_AddNumberToObject(u, "progress", n.upd_progress);
+        if (const char *v = espm_ota_provider_available ? espm_ota_provider_available(n.id) : nullptr)
+            cJSON_AddStringToObject(u, "available", v);
+    }
     if (n.battery >= 0) cJSON_AddNumberToObject(o, "battery", n.battery);
     if (n.charge >= 0) cJSON_AddStringToObject(o, "batteryLevel", CHARGE_NAMES[n.charge]);
     // Stamped with the uptime: how long ago, and the time once the clock is set (never 1970).
@@ -1154,6 +1215,7 @@ static esp_err_t remove(httpd_req_t *req)
 #endif
         if (espm_automations_node_removed) espm_automations_node_removed(id);
         espm_links_node_removed(id);
+        if (espm_ota_provider_node_removed) espm_ota_provider_node_removed(id);
     });
     char res[24];
     snprintf(res, sizeof(res), "n%llu", (unsigned long long)id);
@@ -1208,6 +1270,26 @@ static esp_err_t update(httpd_req_t *req)
     return found ? espm_send_ok(req) : espm_send_error(req, 404, "no such device");
 }
 
+#if ESPM_CTRL_OTA
+/** Ask a device to look for an update now and, if updates wait for approval, install the one found. */
+static esp_err_t install_update(httpd_req_t *req)
+{
+    cJSON *body = espm_read_json(req);
+    if (!body) return ESP_FAIL;
+    uint64_t node = number(body, "node");
+    cJSON_Delete(body);
+    esp_err_t err = espm_locked([&] {
+        Node *n = find(node);
+        if (!n) return ESP_ERR_NOT_FOUND;
+        if (!n->requestor) return ESP_ERR_NOT_SUPPORTED;
+        return espm_ota_provider_install(node);
+    });
+    if (err == ESP_ERR_NOT_FOUND) return espm_send_error(req, 404, "no such device");
+    if (err == ESP_ERR_NOT_SUPPORTED) return espm_send_error(req, 409, "the device takes no Matter updates");
+    return err == ESP_OK ? espm_send_ok(req) : espm_send_error(req, 502, "the device didn't answer");
+}
+#endif
+
 struct ControllerRoutes {
     ControllerRoutes()
     {
@@ -1218,6 +1300,9 @@ struct ControllerRoutes {
         espm_route(HTTP_POST, "/api/v1/controller/write", write_attr, ESPM_ACCOUNT);
         espm_route(HTTP_PUT, "/api/v1/controller/nodes/*", update);
         espm_route(HTTP_DELETE, "/api/v1/controller/nodes/*", remove);
+#if ESPM_CTRL_OTA
+        espm_route(HTTP_POST, "/api/v1/controller/update", install_update);
+#endif
     }
 };
 static ControllerRoutes s_routes;

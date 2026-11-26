@@ -87,6 +87,18 @@ export default defineFeature({
 		},
 		{
 			type: 'select',
+			key: 'deviceUpdates',
+			label: 'Firmware updates of devices',
+			help: 'The hub sends paired devices their updates over Matter: devices of the app get the builds you install from the app, others what their makers publish in the CSA’s registry (DCL). Off: no device gets updates over the air.',
+			default: 'auto',
+			options: [
+				{ value: 'auto', label: 'Install automatically' },
+				{ value: 'ask', label: 'Install when I approve' },
+				{ value: 'off', label: 'Off' }
+			]
+		},
+		{
+			type: 'select',
 			key: 'attestation',
 			label: 'Device certificates',
 			help: 'Pairing checks that a device is a certified product. Real products (IKEA, Eve, …) are checked against the CSA’s registry (DCL, needs internet while pairing); development devices (esp-matter examples, own builds) carry test certificates.',
@@ -141,6 +153,7 @@ export default defineFeature({
 			: [];
 	},
 	contribute({ settings, cfg }, out) {
+		const ota = settings.deviceUpdates !== 'off';
 		out
 			.firmware()
 			.source('espm_controller.cpp', 'espm_controller.h', 'espm_links.cpp', 'espm_ble_fix.c')
@@ -150,7 +163,9 @@ export default defineFeature({
 			.define({
 				ESPM_CTRL_FABRIC_ID: Number(settings.fabricId),
 				ESPM_CTRL_MAX_NODES: Number(settings.maxNodes),
-				ESPM_CTRL_NTP: cfg('ntpServer')
+				ESPM_CTRL_NTP: cfg('ntpServer'),
+				ESPM_CTRL_OTA: ota,
+				ESPM_CTRL_OTA_AUTO: settings.deviceUpdates === 'auto'
 			})
 			.sdkconfig({
 				CONFIG_ESP_MATTER_CONTROLLER_ENABLE: true,
@@ -176,13 +191,34 @@ export default defineFeature({
 			.generated('espm_chip_config.h', CHIP_PROJECT_CONFIG)
 			.init('started', 'espm_controller_start();')
 			.init('network', 'espm_time_sync(ESPM_CTRL_NTP);');
+		if (ota) {
+			out.firmware().source('espm_ota_provider.cpp').sdkconfig({
+				// The controller answers OTA requests itself (no Matter server) on endpoint 0, with
+				// espm_ota_provider.cpp in place of esp-matter's provider; images go over BDX.
+				CONFIG_CHIP_DEVICE_ENABLE_DYNAMIC_SERVER: true,
+				CONFIG_ESP_MATTER_OTA_PROVIDER_ENABLED: true,
+				CONFIG_ESP_MATTER_OTA_PROVIDER_DCL_MAINNET: true
+			});
+			out.api({
+				method: 'POST',
+				path: '/api/v1/controller/update',
+				summary: 'Update a device’s firmware now',
+				description:
+					'The device asks the hub for an update right away (Matter OTA, AnnounceOTAProvider) instead of at its next daily check: a device of the app gets the build released for it, others the newest in the DCL. With updates on approval, the update found is installed. 409 when the device takes no Matter updates.',
+				auth: 'token',
+				params: [
+					{ name: 'node', type: 'number', description: 'Node id', required: true, in: 'body' }
+				],
+				response: { ok: true }
+			});
+		}
 		out.api(
 			{
 				method: 'GET',
 				path: '/api/v1/controller/nodes',
 				summary: 'Paired devices',
 				description:
-					'Any account: a user (not admin) gets only the devices and endpoints it has grants for, each with its `access` (`read` or `write`). After pairing (and at boot) the hub reads every device’s endpoints – their `deviceTypes` (what they are) and server `clusters` (what they can do) – and subscribes to the attributes it knows: `on`, `level`, `colorTemperature` (mireds, with the light’s range `colorTempMin`/`colorTempMax`), `closedPercent`, `lockState`, thermostat (`localTemperature`, `outdoorTemperature`, `systemMode`, `heatingSetpoint`, `coolingSetpoint`, `controlSequence`), `fanMode`, and the sensors `temperature`, `humidity`, `stateValue`, `occupied`, `illuminance` (lx), `pressure` (hPa), `power` (W) and `energy` (kWh, imported in total), and of switches `switchFeatures` (the Switch FeatureMap). An endpoint lists only the attributes the device reported; `null` means the device reports no value. `state` is `connecting`, `online` or `offline`. Per device: its `tags`, `vendor`, `product` and `softwareVersion` (read when it connects), `battery` (%) and/or `batteryLevel` (`ok`, `warning`, `critical`) for battery-powered ones, `lastSeenAgo` (s since its last report) and `lastSeen` (Unix time, once the hub’s clock is set). While online, the hub reads the device’s `diagnostics` every minute (`uptime` s, `rebootCount`, `heapFree` and `heapHighWatermark` bytes), if it has them.',
+					'Any account: a user (not admin) gets only the devices and endpoints it has grants for, each with its `access` (`read` or `write`). After pairing (and at boot) the hub reads every device’s endpoints – their `deviceTypes` (what they are) and server `clusters` (what they can do) – and subscribes to the attributes it knows: `on`, `level`, `colorTemperature` (mireds, with the light’s range `colorTempMin`/`colorTempMax`), `closedPercent`, `lockState`, thermostat (`localTemperature`, `outdoorTemperature`, `systemMode`, `heatingSetpoint`, `coolingSetpoint`, `controlSequence`), `fanMode`, and the sensors `temperature`, `humidity`, `stateValue`, `occupied`, `illuminance` (lx), `pressure` (hPa), `power` (W) and `energy` (kWh, imported in total), and of switches `switchFeatures` (the Switch FeatureMap). An endpoint lists only the attributes the device reported; `null` means the device reports no value. `state` is `connecting`, `online` or `offline`. Per device: its `tags`, `vendor`, `product` and `softwareVersion` (read when it connects), `update` for devices that take Matter updates (`state`: `idle`, `querying`, `downloading`, `applying` …, `progress` %, and `available`: the version waiting for approval), `battery` (%) and/or `batteryLevel` (`ok`, `warning`, `critical`) for battery-powered ones, `lastSeenAgo` (s since its last report) and `lastSeen` (Unix time, once the hub’s clock is set). While online, the hub reads the device’s `diagnostics` every minute (`uptime` s, `rebootCount`, `heapFree` and `heapHighWatermark` bytes), if it has them.',
 				auth: 'token',
 				response: {
 					nodes: [
@@ -195,6 +231,7 @@ export default defineFeature({
 							vendor: 'IKEA of Sweden',
 							product: 'KAJPLATS E27',
 							softwareVersion: '1.2.3',
+							update: { state: 'idle', available: '1.2.4' },
 							lastSeenAgo: 12,
 							lastSeen: 1793900000,
 							diagnostics: {
@@ -403,7 +440,8 @@ export default defineFeature({
 				title: 'Devices',
 				tab: 'Devices',
 				wide: true,
-				order: 10
+				order: 10,
+				props: { deviceUpdates: ota }
 			},
 			{
 				page: 'settings',

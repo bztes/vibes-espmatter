@@ -21,6 +21,9 @@
 	import LinksEditor from './LinksEditor.svelte';
 	import PairDialog from './PairDialog.svelte';
 
+	/** The hub sends devices their firmware updates (Matter OTA provider). */
+	let { deviceUpdates = false }: { deviceUpdates?: boolean } = $props();
+
 	const nodes = new Poll<{ nodes: Node[] }>('/api/v1/controller/nodes', 10000);
 
 	interface Draft {
@@ -93,6 +96,31 @@
 		);
 	}
 
+	function checkUpdate(n: Node) {
+		void run(
+			() => api('/api/v1/controller/update', { method: 'POST', body: { node: n.id } }),
+			n.update?.available
+				? `${n.name} installs ${n.update.available}.`
+				: `${n.name} is checking for an update.`
+		);
+	}
+
+	const UPDATE_STEPS: Record<string, string> = {
+		querying: 'Checking for an update',
+		downloading: 'Downloading update',
+		applying: 'Installing update',
+		delayedOnApply: 'Update waits to install',
+		rollingBack: 'Rolling back update'
+	};
+
+	const updateText = (n: Node) => {
+		const step = n.update?.state && UPDATE_STEPS[n.update.state];
+		if (!step) return undefined;
+		return n.update?.state === 'downloading' && n.update.progress != null
+			? `${step} ${n.update.progress} %`
+			: step;
+	};
+
 	function seen(n: Node) {
 		if (n.state === 'online') return 'Online';
 		if (n.lastSeenAgo == null) return 'Not seen since the hub started';
@@ -138,6 +166,9 @@
 							<span class="truncate font-medium">{n.name}</span>
 							{#if n.state === 'offline'}<Badge tone="err">offline</Badge>
 							{:else if n.state === 'connecting'}<Badge tone="info">connecting</Badge>{/if}
+							{#if updateText(n)}<Badge tone="info">{updateText(n)}</Badge>
+							{:else if n.update?.available}<Badge tone="warn">Update {n.update.available}</Badge
+								>{/if}
 							{#if n.battery != null || n.batteryLevel}
 								<Badge tone={batteryTone(n)}
 									>Battery {n.battery != null ? `${n.battery} %` : n.batteryLevel}</Badge
@@ -147,6 +178,15 @@
 						<div class="truncate text-xs text-muted">{what(n) || `Node ${n.id}`}</div>
 					</div>
 					<div class="flex gap-1">
+						{#if deviceUpdates && n.update && n.state === 'online'}
+							<Button
+								size="sm"
+								variant="ghost"
+								disabled={busy || !!updateText(n)}
+								onclick={() => checkUpdate(n)}
+								>{n.update.available ? 'Install update' : 'Check for update'}</Button
+							>
+						{/if}
 						<Button size="sm" variant="ghost" onclick={() => edit(n)}>Edit</Button>
 						{#if confirmDelete === n.id}
 							<Button size="sm" variant="danger" disabled={busy} onclick={() => remove(n)}

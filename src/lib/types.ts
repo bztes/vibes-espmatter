@@ -23,6 +23,9 @@ export interface SlotArtifacts {
 	/** Application image (OTA). */
 	app: string;
 	appSize: number;
+	/** Matter devices: the app as a Matter OTA image (their hub sends it). */
+	matterOta?: string;
+	matterOtaSize?: number;
 	/** Everything of the build in one image, flashed at 0x0 (without a device configuration). */
 	merged: string;
 	sha256: string;

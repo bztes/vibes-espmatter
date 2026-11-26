@@ -66,18 +66,16 @@
 		if (kind === 'hub') {
 			out.push(straight(X.app, X.hub, -10, UPDATES, 'updates'));
 			if (link.access === 'tunnel') out.push(straight(X.app, X.hub, 10, ACCESS, 'tunnel'));
-			if (link.relay) {
-				out.push(straight(X.hub, X.dev, -10, UPDATES, 'updates'));
-				if (link.access === 'tunnel') out.push(straight(X.hub, X.dev, 10, ACCESS, 'access'));
-			}
+			// Paired devices get their updates over Matter.
+			out.push(straight(X.hub, X.dev, -10, UPDATES, 'updates'));
+			if (link.relay && link.access === 'tunnel')
+				out.push(straight(X.hub, X.dev, 10, ACCESS, 'access'));
 			return out;
 		}
-		if (link.updates === 'app') out.push(around(true, UPDATES, 'updates'));
-		else
-			out.push(
-				straight(X.app, X.hub, -10, UPDATES, 'updates'),
-				straight(X.hub, X.dev, -10, UPDATES, 'updates')
-			);
+		out.push(
+			straight(X.app, X.hub, -10, UPDATES, 'updates'),
+			straight(X.hub, X.dev, -10, UPDATES, 'updates')
+		);
 		if (link.access === 'tunnel') out.push(around(false, ACCESS, 'tunnel'));
 		else if (link.access === 'hub')
 			out.push(

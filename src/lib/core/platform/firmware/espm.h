@@ -202,29 +202,16 @@ void espm_metrics_remote_report(int index, const espm_metric_sink_t *sink);
 // ---------------------------------------------------------------------------------------------
 
 void espm_ota_init();
-/** Ask the app for an update now. False: this device doesn't pull (off, or no app URL). */
+/** Look for an update now (the hub's provider, or the app for a hub). False: not now / not at all. */
 bool espm_ota_check_now();
 
-#if ESPM_UPDATE_PULL
-#include <esp_http_client.h>
-
-/** An update the app has for a slot. */
-struct espm_update_t {
-    int version;
-    char url[256];
-    /** Image size and SHA-256 (hex), 0 / "" when the app didn't say. */
-    int size;
-    char sha256[65];
-};
-/**
- * Ask the app – or, on a Thread device, a hub's update relay – for an update of another slot of
- * this device (a board the main board flashes), which runs `running` (0: unknown).
- */
-bool espm_update_manifest(const char *slot, int running, espm_update_t *out);
-/** Start downloading `url` with the device's token: the client past the headers, or nullptr. */
-esp_http_client_handle_t espm_update_open(const char *url, int64_t *length);
+#if ESPM_HTTP
 /** Tell the app what runs on `slot` and how an update goes (`downloading`, `installed`, `failed`, `running`). */
 void espm_update_report(const char *slot, const char *state, int version, int running, const char *message);
+#if ESPM_MATTER_OTA
+/** A Matter update changed state (kOtaStateChanged): reported to the app. Matter task. */
+void espm_ota_matter_event(const ChipDeviceEvent *event);
+#endif
 #endif
 
 // ---------------------------------------------------------------------------------------------
@@ -233,19 +220,10 @@ void espm_update_report(const char *slot, const char *state, int version, int ru
 
 #if ESPM_SLOTFLASH
 /**
- * Wait until the main board is done with `slot`'s update check (and update) at boot. A plugin
+ * Wait until the main board is done flashing `slot` at boot (if its firmware changed). A plugin
  * calls this before it uses the wires to the board – the flasher needs them meanwhile.
  */
 void espm_slot_wait(const char *slot);
-/**
- * A plugin that uses the wires to `slot` lets go of them for an update found while running:
- * `release` stops using them (returns once they're free), `reclaim` takes them back after the
- * board was flashed and restarted. Without these, such an update restarts the main board instead.
- */
-void espm_slot_on_update(const char *slot, void (*release)(), void (*reclaim)());
-/** Called by the pull check: installs a board's update (or restarts for it, see espm_slot_on_update). */
-void espm_slotflash_check();
 #else
 inline void espm_slot_wait(const char *) {}
-inline void espm_slot_on_update(const char *, void (*)(), void (*)()) {}
 #endif

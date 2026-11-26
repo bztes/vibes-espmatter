@@ -1,4 +1,4 @@
-<!-- The Firmware tab of a device: which firmware it runs, and installing its builds – over USB, or released for the device to pull (directly or through its hub). -->
+<!-- The Firmware tab of a device: which firmware it runs, and installing its builds – over USB, or released over the air (a hub pulls it, a Matter device gets it from its hub). -->
 <script lang="ts">
 	import Download from '@lucide/svelte/icons/download';
 	import Radio from '@lucide/svelte/icons/radio';
@@ -131,8 +131,8 @@
 									<div class="font-semibold">
 										{a.name}
 										{#if a.viaMain}<span
-												title="Flash it over USB once – after that the main board installs this firmware over the wires with every update."
-												><Badge>updated by the main board</Badge></span
+												title="Flash it over USB once – after that the main board’s firmware carries it and flashes it over the wires when it changes."
+												><Badge>inside the main board’s firmware</Badge></span
 											>{:else if a.flashFirst}<Badge tone="warn">flash first</Badge>{/if}
 									</div>
 									<div class="text-xs text-muted">

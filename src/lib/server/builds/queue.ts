@@ -244,8 +244,13 @@ async function run(
 	if (!fw) throw new Error('The firmware was deleted.');
 	const a = assemble(normalize(row.config), { version: row.version, buildId: row.id });
 	const read = await loadFirmware(a.firmware.flatMap((f) => f.sources));
-	const projects = generate(a, read, row.version).sort(
-		(x, y) => Number(y.flashFirst) - Number(x.flashFirst)
+	// Slots another one embeds are built before it; then those flashed first.
+	const generated = generate(a, read, row.version);
+	const embedded = new Set(generated.flatMap((p) => p.embeds.map((e) => e.slot)));
+	const projects = generated.sort(
+		(x, y) =>
+			Number(embedded.has(y.slot)) - Number(embedded.has(x.slot)) ||
+			Number(y.flashFirst) - Number(x.flashFirst)
 	);
 	log(
 		`Building "${fw.name}" version ${row.version} on runner "${r.name}" (${projects.length} board${projects.length > 1 ? 's' : ''})`
@@ -257,6 +262,11 @@ async function run(
 		await db.update(build).set({ step: project.slot }).where(eq(build.id, row.id));
 		log(`── ${project.name}: ${project.board} (${project.target}) ──`);
 		const files: Record<string, string | Buffer> = { ...project.files };
+		// The main board carries the apps of the boards it flashes over a wire.
+		for (const e of project.embeds)
+			files[`main/${e.file}`] = await fs.readFile(
+				path.join(artifactDir(row.id), e.slot, 'app.bin')
+			);
 		if (project.needsUi)
 			files[`main/${UI_FILE}`] = await buildDeviceUi(
 				uiSpec(a),
@@ -292,6 +302,9 @@ async function run(
 	}
 	return out;
 }
+
+/** A Matter device's app with the Matter OTA header, next to its app.bin. */
+const MATTER_OTA_FILE = 'matter.ota';
 
 const workspaceName = (firmwareId: string, slot: string) => `${firmwareId}-${slot}`;
 
@@ -333,6 +346,9 @@ async function collect(
 	const app = await read(args.app.file);
 	await fs.writeFile(path.join(slotDir, 'app.bin'), app);
 	log(`${project.name}: app ${(app.length / 1024).toFixed(0)} KB (${appFile})`);
+	// Matter devices: the same app with the Matter OTA header (what their hub sends them).
+	const matterImage = await read(appFile.replace(/\.bin$/, '-ota.bin')).catch(() => undefined);
+	if (matterImage) await fs.writeFile(path.join(slotDir, MATTER_OTA_FILE), matterImage);
 	return {
 		name: project.name,
 		board: project.board,
@@ -346,6 +362,7 @@ async function collect(
 		app: 'app.bin',
 		appSize: app.length,
 		merged: 'merged.bin',
+		...(matterImage ? { matterOta: MATTER_OTA_FILE, matterOtaSize: matterImage.length } : {}),
 		sha256: createHash('sha256').update(app).digest('hex'),
 		config: project.configPartition
 	};

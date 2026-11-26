@@ -1,10 +1,9 @@
 <script lang="ts">
-	import { Poll, Row, formatBytes } from '#sdk/device-ui';
+	import { Poll, Row } from '#sdk/device-ui';
 
 	const relay = new Poll<{
 		requests: number;
-		transfers: number;
-		bytes: number;
+		forwards: number;
 		lastDevice: string;
 		lastError: string;
 	}>('/api/v1/relay', 10000);
@@ -12,8 +11,8 @@
 
 {#if relay.current}
 	{@const r = relay.current}
-	<Row label="Requests">{r.requests}</Row>
-	<Row label="Images relayed">{r.transfers} ({formatBytes(r.bytes)})</Row>
+	<Row label="Reports relayed">{r.requests}</Row>
+	<Row label="App requests passed on">{r.forwards}</Row>
 	<Row label="Last device"><span class="font-mono text-xs">{r.lastDevice || '–'}</span></Row>
 	{#if r.lastError}<p class="mt-2 text-xs text-err">{r.lastError}</p>{/if}
 {/if}

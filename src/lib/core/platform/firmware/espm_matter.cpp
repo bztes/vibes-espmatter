@@ -11,6 +11,7 @@
 #include <app/server/Server.h>
 #include <crypto/CHIPCryptoPAL.h>
 #include <platform/CommissionableDataProvider.h>
+#include <platform/ConfigurationManager.h>
 #endif
 
 using namespace esp_matter;
@@ -68,6 +69,19 @@ private:
 };
 static Onboarding s_onboarding;
 
+/** BasicInformation UniqueID = the app's id of the device (dashes dropped: at most 32 characters). */
+static void set_unique_id()
+{
+    char want[33] = {}, have[33] = {};
+    size_t n = 0;
+    for (const char *p = ESPM_DEVICE_ID; *p && n < 32; p++)
+        if (*p != '-') want[n++] = *p;
+    if (!n) return;
+    auto &cfg = chip::DeviceLayer::ConfigurationMgr();
+    if (cfg.GetUniqueId(have, sizeof(have)) == CHIP_NO_ERROR && strcmp(have, want) == 0) return;
+    cfg.StoreUniqueId(want, n);
+}
+
 static esp_err_t on_attribute(attribute::callback_type_t type, uint16_t endpoint, uint32_t cluster,
                               uint32_t attribute, esp_matter_attr_val_t *val, void *)
 {
@@ -102,6 +116,8 @@ void espm_matter_init()
 #else
     if (s_onboarding.Init() == CHIP_NO_ERROR) set_custom_commissionable_data_provider(&s_onboarding);
     else ESP_LOGE(TAG, "Could not compute the SPAKE2+ verifier");
+    // The hub finds the device in the app by it (firmware updates).
+    set_unique_id();
 
     node::config_t config;
     strncpy(config.root_node.basic_information.node_label, ESPM_DEVICE_NAME,
@@ -152,6 +168,11 @@ void espm_matter_event(const ChipDeviceEvent *event, intptr_t)
     case chip::DeviceLayer::DeviceEventType::kFailSafeTimerExpired:
         ESP_LOGW(TAG, "Commissioning failed (fail-safe timer expired)");
         break;
+#if ESPM_HTTP && ESPM_MATTER_OTA
+    case chip::DeviceLayer::DeviceEventType::kOtaStateChanged:
+        espm_ota_matter_event(event);
+        break;
+#endif
     default:
         break;
     }

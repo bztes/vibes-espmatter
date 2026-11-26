@@ -1,8 +1,7 @@
-// espmatter studio – hub relay: devices that can't (or shouldn't) talk to the app themselves pull
-// their updates through the hub, and the app reaches them through the hub's tunnel.
-//   GET  /api/v1/relay/devices/<id>/update  → app /api/v1/devices/<id>/update (image URL rewritten)
+// espmatter studio – hub relay: devices that can't (or shouldn't) talk to the app themselves report
+// through the hub, and the app reaches them through the hub's tunnel. (Their updates come from the
+// hub's Matter OTA provider.)
 //   POST /api/v1/relay/devices/<id>/report  → app /api/v1/devices/<id>/report
-//   GET  /api/v1/relay/images/<path>        → app /api/v1/firmware/<path>, streamed
 //   *    /api/v1/relay/forward/<id>/<path>  → the device at its address, /<path>
 // The caller's Authorization header is forwarded unchanged: the app decides, the hub only relays.
 // A device's address is learned from its relayed requests the app accepted (so only with its token).
@@ -21,8 +20,7 @@
 #include <nvs.h>
 
 static const char *TAG = "espm_hubrelay";
-static unsigned s_requests, s_transfers;
-static unsigned long long s_bytes;
+static unsigned s_requests, s_forwards;
 static char s_last_device[40], s_last_error[64];
 
 #if ESPM_HTTP
@@ -125,82 +123,10 @@ static esp_http_client_handle_t upstream(httpd_req_t *req, const char *path, esp
     return client;
 }
 
-static esp_err_t fail(httpd_req_t *req, esp_http_client_handle_t client, const char *msg)
-{
-    strlcpy(s_last_error, msg, sizeof(s_last_error));
-    esp_http_client_cleanup(client);
-    return espm_send_error(req, 502, msg);
-}
-
-/** Stream a binary from the app (firmware image, device configuration). */
-static esp_err_t stream(httpd_req_t *req, const char *path)
-{
-    esp_http_client_handle_t client = upstream(req, path, HTTP_METHOD_GET);
-    if (esp_http_client_open(client, 0) != ESP_OK) return fail(req, client, "app unreachable");
-    int64_t length = esp_http_client_fetch_headers(client);
-    if (esp_http_client_get_status_code(client) != 200) return fail(req, client, "not available");
-    s_transfers++;
-    httpd_resp_set_type(req, "application/octet-stream");
-    if (length > 0) {
-        char len[16];
-        snprintf(len, sizeof(len), "%lld", (long long)length);
-        httpd_resp_set_hdr(req, "Content-Length", len);
-    }
-    static char buf[2048];
-    int n;
-    while ((n = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
-        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) break;
-        s_bytes += n;
-    }
-    esp_http_client_cleanup(client);
-    return httpd_resp_send_chunk(req, nullptr, 0);
-}
-
-static esp_err_t manifest(httpd_req_t *req)
-{
-    s_requests++;
-    const char *path = app_path(req);
-    sscanf(path, "/devices/%39[^/]", s_last_device);
-    esp_http_client_handle_t client = upstream(req, path, HTTP_METHOD_GET);
-    if (esp_http_client_open(client, 0) != ESP_OK) return fail(req, client, "app unreachable");
-    esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    if (status == 200 || status == 204) learn(req);
-    if (status == 204) {
-        esp_http_client_cleanup(client);
-        httpd_resp_set_status(req, "204 No Content");
-        return httpd_resp_send(req, nullptr, 0);
-    }
-    char buf[512] = {};
-    int n = esp_http_client_read_response(client, buf, sizeof(buf) - 1);
-    esp_http_client_cleanup(client);
-    cJSON *json = n > 0 ? cJSON_Parse(buf) : nullptr;
-    if (status != 200 || !json) {
-        cJSON_Delete(json);
-        return espm_send_error(req, status ? status : 502, "no update");
-    }
-    // http://app/api/v1/firmware/<build>/<slot>.bin → http://[hub]/api/v1/relay/images/<build>/<slot>.bin
-    // (a manifest with only a new configuration has no image URL)
-    cJSON *url = cJSON_GetObjectItem(json, "url");
-    if (cJSON_IsString(url)) {
-        const char *tail = strstr(url->valuestring, "/api/v1/firmware/");
-        char host[64] = {}, rewritten[256];
-        httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
-        snprintf(rewritten, sizeof(rewritten), "http://%s/api/v1/relay/images/%s", host, tail ? tail + 17 : "");
-        cJSON_SetValuestring(url, rewritten);
-    }
-    return espm_send_json(req, json);
-}
-
-static esp_err_t image(httpd_req_t *req)
-{
-    char path[200];
-    snprintf(path, sizeof(path), "/firmware/%s", req->uri + strlen("/api/v1/relay/images/"));
-    return stream(req, path);
-}
-
 static esp_err_t report(httpd_req_t *req)
 {
+    s_requests++;
+    sscanf(app_path(req), "/devices/%39[^/]", s_last_device);
     char body[512];
     int len = httpd_req_recv(req, body, sizeof(body) - 1);
     if (len <= 0) return espm_send_error(req, 400, "empty report");
@@ -211,6 +137,7 @@ static esp_err_t report(httpd_req_t *req)
     int status = err == ESP_OK ? esp_http_client_get_status_code(client) : 0;
     esp_http_client_cleanup(client);
     if (status >= 200 && status < 300) learn(req);
+    if (err != ESP_OK) strlcpy(s_last_error, "app unreachable", sizeof(s_last_error));
     return err == ESP_OK ? espm_send_ok(req) : espm_send_error(req, 502, "app unreachable");
 }
 
@@ -240,6 +167,7 @@ static esp_err_t forward(httpd_req_t *req)
     const Node *node = find_node(id);
     // 421: the app tries another way (this hub doesn't know the device).
     if (!node) return espm_send_error(req, 421, "device unknown to this hub");
+    s_forwards++;
 
     char url[600];
     if (snprintf(url, sizeof(url), "http://%s%s", node->addr, slash) >= (int)sizeof(url))
@@ -315,8 +243,7 @@ static esp_err_t stats(httpd_req_t *req)
 {
     cJSON *json = cJSON_CreateObject();
     cJSON_AddNumberToObject(json, "requests", s_requests);
-    cJSON_AddNumberToObject(json, "transfers", s_transfers);
-    cJSON_AddNumberToObject(json, "bytes", (double)s_bytes);
+    cJSON_AddNumberToObject(json, "forwards", s_forwards);
     cJSON_AddStringToObject(json, "lastDevice", s_last_device);
     cJSON_AddStringToObject(json, "lastError", s_last_error);
     return espm_send_json(req, json);
@@ -326,9 +253,7 @@ struct RelayRoutes {
     RelayRoutes()
     {
         espm_route(HTTP_GET, "/api/v1/relay", stats);
-        espm_route(HTTP_GET, "/api/v1/relay/devices/*", manifest, ESPM_PUBLIC);
         espm_route(HTTP_POST, "/api/v1/relay/devices/*", report, ESPM_PUBLIC);
-        espm_route(HTTP_GET, "/api/v1/relay/images/*", image, ESPM_PUBLIC);
         // Public like the rest: the device checks its own token.
         for (httpd_method_t m : {HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE})
             espm_route(m, "/api/v1/relay/forward/*", forward, ESPM_PUBLIC);

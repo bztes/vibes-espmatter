@@ -27,13 +27,6 @@ export default [
 		api: { '/api/v1/thread': { rcp: 'starting' } }
 	},
 	{
-		name: 'Radio updating',
-		page: 'settings',
-		component: ThreadWidget,
-		tab: 'Network',
-		api: { '/api/v1/thread': { rcp: 'updating' } }
-	},
-	{
 		name: 'Radio offline',
 		page: 'settings',
 		component: ThreadWidget,

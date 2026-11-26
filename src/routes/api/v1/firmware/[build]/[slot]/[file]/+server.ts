@@ -3,23 +3,24 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { error } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { slug } from '#sdk';
 import { db } from '#lib/server/db/index.ts';
-import { firmware } from '#lib/server/db/schema.ts';
+import { device, firmware } from '#lib/server/db/schema.ts';
 import { deviceFromToken } from '#lib/server/deploy.ts';
 import { artifactDir, getBuild } from '#lib/server/builds/queue.ts';
 import type { RequestHandler } from './$types';
 
 /**
- * Build artifacts, for a device of the firmware (its token) or the owner (signed in). Without
- * device settings: those are written by the app's USB flasher, or on the board itself.
+ * Build artifacts, for a device of the firmware (its token, or its hub's: the hub's OTA provider
+ * sends it its update) or the owner (signed in). Without device settings: those are written by the
+ * app's USB flasher, or on the board itself.
  */
 export const GET: RequestHandler = async ({ params, request, locals, url }) => {
 	if (
 		!/^[0-9a-f-]{36}$/.test(params.build) ||
 		!/^[a-z0-9-]{1,24}$/.test(params.slot) ||
-		!/^[\w.-]+\.bin$/.test(params.file)
+		!/^[\w.-]+\.(bin|ota)$/.test(params.file)
 	)
 		error(404);
 	const b = await getBuild(params.build);
@@ -32,7 +33,16 @@ export const GET: RequestHandler = async ({ params, request, locals, url }) => {
 		if (fw?.ownerId !== locals.user.id && locals.user.role !== 'admin') error(404);
 	} else {
 		const dev = await deviceFromToken(request);
-		if (dev.firmwareId !== b.firmwareId) error(404);
+		// A hub fetches the builds of its devices for them.
+		const forChild = async () =>
+			(
+				await db
+					.select({ id: device.id })
+					.from(device)
+					.where(and(eq(device.hubId, dev.id), eq(device.firmwareId, b.firmwareId)))
+					.limit(1)
+			).length > 0;
+		if (dev.firmwareId !== b.firmwareId && !(await forChild())) error(404);
 	}
 	const file = path.join(artifactDir(b.id), params.slot, params.file);
 	const stat = await fs.stat(file).catch(() => undefined);

@@ -15,10 +15,13 @@ import { MAIN } from './model';
 export const PLATFORM_DIR = 'src/lib/core/platform';
 
 /**
- * The main board can get updates over the air: it has an IP network. Whether a device does is its
- * own setting (`updates.pull`), read at runtime.
+ * A hub pulls its own updates from the app (whether it does is its setting `updates.pull`, read at
+ * runtime). Matter devices get theirs over Matter from their hub (`matterOta`).
  */
-export const canPull = (r: Resolved) => r.has('ip');
+export const canPull = (r: Resolved) => r.config.kind === 'hub' && r.has('ip');
+
+/** A Matter device: updates over Matter (OTA Requestor), from its hub's OTA provider. */
+export const matterOta = (r: Resolved) => KINDS[r.config.kind].matterDevice;
 
 /** Hubs keep accounts of their own (admins, and users with grants per paired device and endpoint). */
 export const hasAccounts = (r: Resolved) => r.config.kind === 'hub';
@@ -230,7 +233,7 @@ const OTA_STATUS: ApiRoute = {
 	auth: 'token',
 	response: {
 		version: 12,
-		pull: true,
+		pull: false,
 		partition: 'ota_0',
 		state: 'idle',
 		lastCheck: 1730700000,
@@ -258,7 +261,7 @@ const UPDATE_CHECK: ApiRoute = {
 	path: '/api/v1/ota/check',
 	summary: 'Check for an update now',
 	description:
-		'The device asks for new firmware and settings right away (the app, or through its hub) instead of at its next periodic check. Called by the app after releasing a build or saving settings. 409 when the device doesn’t take updates.',
+		'A Matter device asks its hub’s OTA provider right away instead of at its next daily query; a hub asks the app. Called by the app after releasing a build. 409 when the device doesn’t take updates now.',
 	auth: 'token',
 	response: { ok: true }
 };
@@ -282,21 +285,6 @@ const TUNNEL_STATUS: ApiRoute = {
 
 const RELAY_API: ApiRoute[] = [
 	{
-		method: 'GET',
-		path: '/api/v1/relay/devices/*',
-		summary: 'Update manifest for a device (proxied to the app)',
-		description:
-			'`/api/v1/relay/devices/<id>/update?slot=main&version=<n>`: what the app answers for that device, with the image URL rewritten to the relay. The device’s own token is passed on – the hub adds no authority of its own.',
-		auth: 'public',
-		response: { version: 13, url: 'http://[fd11::1]:80/api/v1/relay/images/<build>/main.bin' }
-	},
-	{
-		method: 'GET',
-		path: '/api/v1/relay/images/*',
-		summary: 'Firmware image, streamed from the app',
-		auth: 'public'
-	},
-	{
 		method: 'POST',
 		path: '/api/v1/relay/devices/*',
 		summary: 'Report of a device (forwarded to the app)',
@@ -307,7 +295,7 @@ const RELAY_API: ApiRoute[] = [
 		path: '/api/v1/relay/forward/*',
 		summary: 'A request of the app for a device (`/api/v1/relay/forward/<id>/<path>`)',
 		description:
-			'Passed on to `<path>` of the device, also as POST, PUT and DELETE. The hub learns a device’s address from its reports and update checks through the relay (421 until then). The device’s own token is passed on – the hub adds no authority of its own.',
+			'Passed on to `<path>` of the device, also as POST, PUT and DELETE. The hub learns a device’s address from its reports through the relay (421 until then). The device’s own token is passed on – the hub adds no authority of its own.',
 		auth: 'public'
 	},
 	{
@@ -315,7 +303,7 @@ const RELAY_API: ApiRoute[] = [
 		path: '/api/v1/relay',
 		summary: 'Relay statistics',
 		auth: 'token',
-		response: { requests: 42, transfers: 3, bytes: 4718592, lastDevice: '6f1c…', lastError: '' }
+		response: { requests: 42, forwards: 17, lastDevice: '6f1c…', lastError: '' }
 	}
 ];
 
@@ -330,7 +318,8 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 	const http = r.has('ip');
 	const pull = canPull(r);
 	const link = appLink(r);
-	const matterDevice = KINDS[config.kind].matterDevice;
+	// A Matter device also takes its updates over Matter.
+	const matterDevice = matterOta(r);
 
 	for (const slot of r.slots) {
 		const fw = out.firmware(slot.id);
@@ -370,9 +359,10 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 				ESPM_HTTP: http,
 				// Accounts with roles and per-device grants, managed on the hub itself (espm_users.cpp).
 				ESPM_USERS: http && hasAccounts(r),
-				// Compiled in when the network allows it; each device switches them on or off.
+				// A hub pulls its own updates (and switches that on or off); Matter devices get theirs
+				// over Matter. Both report what they run.
 				ESPM_UPDATE_PULL: pull,
-				ESPM_UPDATE_VIA_HUB: link.updates === 'hub',
+				ESPM_MATTER_OTA: matterDevice,
 				// Uses a hub (updates or access): finds it on Thread or the LAN, reports through it.
 				ESPM_VIA_HUB: link.viaHub,
 				ESPM_HUB_OVER_THREAD: !r.has('uplink'),
@@ -395,10 +385,19 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 				CONFIG_BT_NIMBLE_ENABLED: true,
 				CONFIG_ENABLE_CHIPOBLE: true,
 				CONFIG_USE_MINIMAL_MDNS: true,
-				CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP: true,
+				CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP: pull,
 				// The app may be reached over HTTPS (each device has its own app URL).
 				CONFIG_MBEDTLS_CERTIFICATE_BUNDLE: true
 			})
+			.sdkconfig(
+				matterDevice
+					? {
+							// Its hub is its default OTA provider; the build also makes the Matter OTA image.
+							CONFIG_ENABLE_OTA_REQUESTOR: true,
+							CONFIG_CHIP_OTA_IMAGE_BUILD: true
+						}
+					: {}
+			)
 			.init('early', 'espm_cfg_init();')
 			.init('matter', 'espm_matter_init();')
 			.init('started', 'espm_ota_init();')
@@ -438,7 +437,7 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 
 	if (r.has('ip')) out.api(...CORE_API, ...(matterDevice ? MATTER_DEVICE_API : []));
 	if (http) out.api(OTA_STATUS);
-	if (pull && http) out.api(UPDATE_CHECK);
+	if ((pull || matterDevice) && http) out.api(UPDATE_CHECK);
 	if (http) out.api(METRICS);
 	if (http && link.access === 'tunnel') out.api(TUNNEL_STATUS);
 	if (http && link.relay) out.api(...RELAY_API);
@@ -459,7 +458,7 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 			title: 'Firmware',
 			tab: 'System',
 			order: 91,
-			props: { canPull: pull }
+			props: { canPull: pull, matterOta: matterDevice }
 		}
 	);
 	if (link.relay)
@@ -485,7 +484,7 @@ export function platform(r: Resolved, out: Contributor, build?: BuildInfo) {
 	const wired = r.slots.filter((s) => s.wired);
 	if (wired.length)
 		out.note(
-			`${wired.map((s) => s.name).join(', ')}: flash over USB once – after that the main board installs ${wired.length > 1 ? 'their' : 'its'} updates over the wires: release them like the main board's, the main board fetches and flashes them.`
+			`${wired.map((s) => s.name).join(', ')}: flash over USB once – after that the main board's firmware carries ${wired.length > 1 ? 'theirs' : 'its'} and flashes ${wired.length > 1 ? 'them' : 'it'} over the wires when it changes.`
 		);
 }
 
@@ -494,7 +493,7 @@ const SLOTS_STATUS: ApiRoute = {
 	path: '/api/v1/slots',
 	summary: 'Boards the main board flashes over a wire',
 	description:
-		'Per board: the version the main board installed on it (0: unknown, e.g. flashed over USB) and how the last update went (`idle`, `flashing`, `failed`: see `error`).',
+		'Per board: the version the main board installed on it (0: unknown, e.g. flashed over USB) and how the last flash at boot went (`idle`, `flashing`, `failed`: see `error`).',
 	auth: 'token',
 	response: {
 		slots: [
@@ -512,15 +511,14 @@ const SLOTS_STATUS: ApiRoute = {
 };
 
 /**
- * Slots the main board flashes (`SlotDef.flashOverWire`). Their updates are deployments like the
- * main board's: the main board asks the app (or its hub) and streams the image into the
- * slot. The slot is flashed in its ROM download mode, entered when the main board pulls
- * the trigger line low. Plugins wait (`espm_slot_wait`) before using the wires.
+ * Slots the main board flashes (`SlotDef.flashOverWire`). The main board's firmware embeds their
+ * apps (the build makes them first) and flashes one at boot when it changed. The slot is flashed
+ * in its ROM download mode, entered when the main board pulls the trigger line low. Plugins wait
+ * (`espm_slot_wait`) before using the wires.
  */
 function wiredSlots(r: Resolved, out: Contributor, http: boolean) {
-	// The main board gets their updates the way it gets its own: without a route, USB only.
 	const wired = r.slots.filter((s) => s.wired && s.chip.rom);
-	if (!wired.length || !canPull(r)) return;
+	if (!wired.length) return;
 	out
 		.firmware(MAIN)
 		.source('espm_slotflash.h', 'espm_slotflash.cpp')

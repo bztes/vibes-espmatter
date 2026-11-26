@@ -20,17 +20,12 @@
 #include <openthread/thread.h>
 #include <openthread/thread_ftd.h>
 #include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 static const char *TAG = "espm_otbr";
-/** The radio: still starting (waiting for its update check, then connecting), answering, not, or being updated. */
-enum rcp_state_t { RCP_STARTING, RCP_OK, RCP_FAILED, RCP_UPDATING };
+/** The radio: still starting (the hub may be flashing it first, then connecting), answering or not. */
+enum rcp_state_t { RCP_STARTING, RCP_OK, RCP_FAILED };
 static volatile rcp_state_t s_rcp = RCP_STARTING;
-/** Held by whoever drives the radio's UART: this plugin, or the hub flashing the radio (release/reclaim). */
-static SemaphoreHandle_t s_wires;
-/** OpenThread is up (it then owns the UART, except between release and reclaim). */
-static bool s_ot_running;
 
 static void form_network(otInstance *ot, int channel)
 {
@@ -140,12 +135,10 @@ static void wait_for_radio()
     cfg.stop_bits = UART_STOP_BITS_1;
     cfg.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
     cfg.source_clk = UART_SCLK_DEFAULT;
-    // The driver only for each attempt: in between the hub may flash the radio over these wires.
+    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_1, 256, 0, 0, nullptr, 0));
+    uart_param_config(UART_NUM_1, &cfg);
+    uart_set_pin(UART_NUM_1, ESPM_OTBR_TX, ESPM_OTBR_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     for (int attempt = 0;; attempt++) {
-        xSemaphoreTake(s_wires, portMAX_DELAY);
-        ESP_ERROR_CHECK(uart_driver_install(UART_NUM_1, 256, 0, 0, nullptr, 0));
-        uart_param_config(UART_NUM_1, &cfg);
-        uart_set_pin(UART_NUM_1, ESPM_OTBR_TX, ESPM_OTBR_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
         bool ok = rcp_answers();
         if (!ok && attempt % 30 == 2) {
             ESP_LOGE(TAG,
@@ -154,71 +147,21 @@ static void wait_for_radio()
                      ESPM_OTBR_TX, ESPM_OTBR_RX, ESPM_OTBR_BAUD);
             log_radio_output();
         }
-        uart_driver_delete(UART_NUM_1); // OpenThread installs its own driver on this port
-        if (ok) break; // still holding the wires: OpenThread starts next
-        xSemaphoreGive(s_wires);
+        if (ok) break;
         if (attempt >= 2) s_rcp = RCP_FAILED;
         vTaskDelay(pdMS_TO_TICKS(700));
     }
+    uart_driver_delete(UART_NUM_1); // OpenThread installs its own driver on this port
     ESP_LOGI(TAG, "Radio answered");
     s_rcp = RCP_STARTING;
 }
 
-// ---------------------------------------------------------------------------------------------
-// The hub updates the radio while running: let go of the wires meanwhile (espm_slot_on_update)
-// ---------------------------------------------------------------------------------------------
-
-static rcp_state_t s_before_update;
-
-static void release_radio()
-{
-    xSemaphoreTake(s_wires, portMAX_DELAY);
-    s_before_update = s_rcp;
-    s_rcp = RCP_UPDATING;
-    if (!s_ot_running) return; // still looking for the radio: it waits for the wires
-    esp_openthread_lock_acquire(portMAX_DELAY);
-    otInstance *ot = esp_openthread_get_instance();
-    // OpenThread keeps running without its radio – Thread and IPv6 have to be off for that.
-    otThreadSetEnabled(ot, false);
-    otIp6SetEnabled(ot, false);
-    esp_err_t err = esp_openthread_rcp_deinit();
-    esp_openthread_lock_release();
-    if (err != ESP_OK) ESP_LOGE(TAG, "Letting go of the radio failed: %s", esp_err_to_name(err));
-    else ESP_LOGI(TAG, "Thread paused for the radio's update");
-}
-
-static void reclaim_radio()
-{
-    if (!s_ot_running) {
-        s_rcp = s_before_update;
-        xSemaphoreGive(s_wires);
-        return;
-    }
-    esp_openthread_lock_acquire(portMAX_DELAY);
-    otInstance *ot = esp_openthread_get_instance();
-    esp_err_t err = esp_openthread_rcp_init();
-    if (err == ESP_OK) {
-        otIp6SetEnabled(ot, true);
-        otThreadSetEnabled(ot, true);
-    }
-    esp_openthread_lock_release();
-    if (err == ESP_OK) {
-        s_rcp = RCP_OK;
-        ESP_LOGI(TAG, "Radio back, Thread resumed");
-    } else {
-        s_rcp = RCP_FAILED;
-        ESP_LOGE(TAG, "The radio doesn't answer after its update: %s", esp_err_to_name(err));
-    }
-    xSemaphoreGive(s_wires);
-}
-
 static void ot_task(void *)
 {
-    // The hub may be installing the radio's update over these wires first.
+    // The hub may be flashing the radio's new firmware over these wires first.
     espm_slot_wait("radio");
-    espm_slot_on_update("radio", release_radio, reclaim_radio);
     ESP_LOGI(TAG, "Connecting to the radio");
-    wait_for_radio(); // holds s_wires from here until OpenThread runs
+    wait_for_radio();
     esp_openthread_platform_config_t config = {};
     config.radio_config.radio_mode = RADIO_MODE_UART_RCP;
     config.radio_config.radio_uart_config.port = UART_NUM_1;
@@ -239,7 +182,6 @@ static void ot_task(void *)
     if (esp_openthread_init(&config) != ESP_OK) {
         ESP_LOGE(TAG, "OpenThread failed to start");
         s_rcp = RCP_FAILED;
-        xSemaphoreGive(s_wires); // an update may still bring the radio back – at the next boot
         vTaskDelete(nullptr);
         return;
     }
@@ -258,16 +200,13 @@ static void ot_task(void *)
     // Under the lock: infra_if_init releases and re-takes it while waiting (asserts otherwise).
     esp_openthread_set_backbone_netif(esp_netif_get_default_netif());
     esp_openthread_border_router_init();
-    s_ot_running = true;
     esp_openthread_lock_release();
-    xSemaphoreGive(s_wires);
 
     esp_openthread_launch_mainloop();
 }
 
 void espm_otbr_start()
 {
-    s_wires = xSemaphoreCreateMutex();
     mdns_init();
     mdns_hostname_set(espm_hostname());
     // esp_openthread_init() logs a lot: 8 KB overflowed into the heap before.
@@ -307,7 +246,6 @@ static esp_err_t status(httpd_req_t *req)
     cJSON *json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "rcp", s_rcp == RCP_OK         ? "ok"
                                           : s_rcp == RCP_STARTING ? "starting"
-                                          : s_rcp == RCP_UPDATING ? "updating"
                                                                   : "no answer");
     if (s_rcp == RCP_OK) {
         esp_openthread_lock_acquire(portMAX_DELAY);

@@ -27,11 +27,35 @@ export interface GeneratedSlot {
 	needsUi: boolean;
 	/** Where the device configuration goes (Matter slots). */
 	configPartition?: { offset: number; size: number };
-	/** The main board installs this slot's updates over a wire (`SlotDef.flashOverWire`). */
+	/** The main board flashes this slot over a wire (`SlotDef.flashOverWire`). */
 	wired: boolean;
+	/** Slots whose app the build puts at `main/<file>` before building this one (embedded). */
+	embeds: { slot: string; file: string }[];
 }
 
+/** Where a wired slot's app goes in the main board's project, and the symbol it gets there. */
+export const embeddedSlotFile = (slot: string) => `slot_${slot.replaceAll('-', '_')}.bin`;
+/** The linker's symbol prefix of an embedded file (EMBED_FILES). */
+const embeddedSymbol = (slot: string) => `_binary_${embeddedSlotFile(slot).replace('.', '_')}`;
+/** The slots the main board flashes over a wire, embedded in its firmware. */
+const flashedOverWire = (a: Assembly) =>
+	a.firmware.filter((fw) => fw.slot.wired && fw.slot.chip.rom);
+
 const PHASES: InitPhase[] = ['early', 'matter', 'started', 'late'];
+
+/**
+ * esp-matter's registry package writes app/AppBuildConfig.h with the dynamic server hardcoded off
+ * (only its GN build reads the Kconfig option): switch it on once esp-matter has written the header,
+ * and add the mock ZAP headers the GN build gives the dynamic server.
+ */
+const DYNAMIC_SERVER_FIX = `set(espm_app_cfg "\${CMAKE_BINARY_DIR}/esp-idf/espressif__esp_matter/app/AppBuildConfig.h")
+file(READ "\${espm_app_cfg}" espm_app_cfg_text)
+string(REPLACE "#define CHIP_DEVICE_CONFIG_DYNAMIC_SERVER 0" "#define CHIP_DEVICE_CONFIG_DYNAMIC_SERVER 1" espm_app_cfg_text "\${espm_app_cfg_text}")
+file(WRITE "\${espm_app_cfg}" "\${espm_app_cfg_text}")
+idf_component_get_property(espm_matter_lib espressif__esp_matter COMPONENT_LIB)
+idf_component_get_property(espm_matter_dir espressif__esp_matter COMPONENT_DIR)
+target_include_directories(\${espm_matter_lib} PRIVATE "\${espm_matter_dir}/connectedhomeip/connectedhomeip/src/app/dynamic_server/mock_includes")
+`;
 
 const BOOTLOADER_OFFSET: Record<string, number> = {
 	esp32: 0x1000,
@@ -274,11 +298,11 @@ ${PHASES.filter((p) => p !== 'matter')
 }
 
 /**
- * The slots the main board flashes over a wire (`SlotDef.flashOverWire`): how to reach each one and
- * where its app goes. The images themselves come from the app at update time.
+ * The slots the main board flashes over a wire (`SlotDef.flashOverWire`): how to reach each one,
+ * where its app goes, and the app itself (embedded in the main board's firmware).
  */
 function slotTable(header: string, a: Assembly): string | undefined {
-	const slots = a.firmware.filter((fw) => fw.slot.wired && fw.slot.chip.rom);
+	const slots = flashedOverWire(a);
 	if (!slots.length) return undefined;
 	const table = slots.map((fw) => {
 		const pins = fw.slot.wired!;
@@ -296,10 +320,20 @@ function slotTable(header: string, a: Assembly): string | undefined {
         .force_mask = ${hex(rom.forceDownload.mask)},
         .app_offset = ${hex(app[3])},
         .app_max = ${hex(app[4])},
+        .image = ${embeddedSymbol(fw.slot.id)}_start,
+        .image_end = ${embeddedSymbol(fw.slot.id)}_end,
     },`;
 	});
 	return `// ${header}
 #include "espm_slotflash.h"
+
+${slots
+	.map(
+		(fw) =>
+			`extern const uint8_t ${embeddedSymbol(fw.slot.id)}_start[] asm("${embeddedSymbol(fw.slot.id)}_start");
+extern const uint8_t ${embeddedSymbol(fw.slot.id)}_end[] asm("${embeddedSymbol(fw.slot.id)}_end");`
+	)
+	.join('\n')}
 
 const espm_slot_t espm_slots[] = {
 ${table.join('\n')}
@@ -336,6 +370,10 @@ export function generateSlot(
 	for (const [name, content] of Object.entries(fw.generated)) files[`main/${name}`] = content;
 	const table = slot.id === MAIN ? slotTable(header, a) : undefined;
 	if (table) files['main/espm_slots.c'] = table;
+	const embeds = table
+		? flashedOverWire(a).map((f) => ({ slot: f.slot.id, file: embeddedSlotFile(f.slot.id) }))
+		: [];
+	const embedFiles = [...(needsUi ? [UI_FILE] : []), ...embeds.map((e) => e.file)];
 	const runtime = Object.values(fw.defines).some((v) => v instanceof CExpr);
 	files['main/espm_config.h'] = [
 		`// ${header}`,
@@ -363,7 +401,7 @@ export function generateSlot(
 	files['main/CMakeLists.txt'] = `# ${header}
 idf_component_register(SRCS ${srcs.map((s) => `"${s}"`).join(' ')}
                        INCLUDE_DIRS "."
-                       WHOLE_ARCHIVE${needsUi ? `\n                       EMBED_FILES "${UI_FILE}"` : ''}${
+                       WHOLE_ARCHIVE${embedFiles.length ? `\n                       EMBED_FILES ${embedFiles.map((f) => `"${f}"`).join(' ')}` : ''}${
 													ldfragments.length
 														? `\n                       LDFRAGMENTS ${ldfragments.map((f) => `"${f}"`).join(' ')}`
 														: ''
@@ -384,6 +422,8 @@ ${fw.matter ? 'target_compile_options(${COMPONENT_LIB} PRIVATE "-DCHIP_HAVE_CONF
 	files['CMakeLists.txt'] = `# ${header}
 cmake_minimum_required(VERSION 3.16)
 set(PROJECT_VER "${version}")
+# The Matter OTA image takes its version from here (CHIP_OTA_IMAGE_BUILD).
+set(PROJECT_VER_NUMBER ${version})
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(espm_${slot.id})
 ${
@@ -393,7 +433,7 @@ idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security;-Wformat=0" APPEND)
 `
 		: ''
-}`;
+}${fw.sdkconfig.CONFIG_CHIP_DEVICE_ENABLE_DYNAMIC_SERVER ? DYNAMIC_SERVER_FIX : ''}`;
 
 	files['README.md'] = `# ${config.name} – ${slot.name}
 
@@ -427,7 +467,8 @@ ${needsUi ? `\n\`main/${UI_FILE}\` (the device web interface) is compiled by the
 		files,
 		needsUi,
 		configPartition: cfg,
-		wired: !!slot.wired
+		wired: !!slot.wired,
+		embeds
 	};
 }
 

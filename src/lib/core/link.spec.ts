@@ -19,10 +19,10 @@ describe('app link', () => {
 	it('lets a Wi-Fi device go through its hub', () => {
 		const dev = createConfig('device', 'Lamp');
 		expect(sources(dev)).toContain('espm_tunnel.cpp');
-		dev.link = { updates: 'hub', access: 'hub', relay: false };
+		dev.link = { access: 'hub', relay: false };
 		const a = assemble(dev);
 		expect(sources(dev)).not.toContain('espm_tunnel.cpp');
-		expect(a.firmware[0].defines).toMatchObject({ ESPM_VIA_HUB: true, ESPM_UPDATE_VIA_HUB: true });
+		expect(a.firmware[0].defines).toMatchObject({ ESPM_VIA_HUB: true, ESPM_MATTER_OTA: true });
 		expect(a.firmware[0].components['espressif/mdns']).toBeDefined();
 		expect(appLink(a.resolved).direct).toBe(false);
 	});
@@ -31,13 +31,13 @@ describe('app link', () => {
 		const dev = createConfig('device', 'Sensor');
 		enableFeature(dev, 'thread');
 		const link = appLink(resolve(dev));
-		expect(link).toMatchObject({ updates: 'hub', access: 'hub', direct: false, viaHub: true });
+		expect(link).toMatchObject({ access: 'hub', direct: false, viaHub: true });
 		expect(assemble(dev).firmware[0].defines.ESPM_HUB_OVER_THREAD).toBe(true);
 	});
 
 	it('takes the choices over from the former features', () => {
 		const hub = normalize({ kind: 'hub', features: { wifi: {}, 'update-relay': {} } });
-		expect(hub.link).toEqual({ updates: 'app', access: 'off', relay: true });
+		expect(hub.link).toEqual({ access: 'off', relay: true });
 		const dev = normalize({ kind: 'device', features: { wifi: {}, 'remote-access': {} } });
 		expect(dev.link).toMatchObject({ access: 'tunnel', relay: false });
 	});
